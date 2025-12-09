@@ -121,7 +121,7 @@ function getThaiSpecialDay(date) {
 const circleNumbers = [
   "➊","➋","➌","➍","➎","➏","➐","➑","➒",
   "➓","➊➊","➊➋","➊➌","➊➍","➊➎","➊➏","➊➐","➊➑","➊➒",
-  "➋➓","➋➊","➋➋","➋➌","➋➍","➋➎","➋➏","➋➐","➋➑","➋➒","➌➓"
+  "➋๐","➋➊","➋➋","➋➌","➋➍","➋➎","➋➏","➋➐","➋➑","➋➒","➌➓"
 ];
 
 function highlightDay(number) {
@@ -226,10 +226,10 @@ function buildCalendarEmbed(date) {
   const special = getThaiSpecialDay(date);
   const specialText = special || "ไม่มีวันสำคัญ";
 
-  const title = "✨ ปฏิทินไทยประจำวัน ✨";
-  const subtitle = `วันนี้เป็น ${weekdayName} ที่ ${dayOfMonth} ${monthName} พ.ศ. ${beYear}`;
+  const title = "✨ ปฏิทินไทยประจำวัน | xSwift Hub✨";
+  const subtitle = `วัน ${weekdayName} ที่ ${dayOfMonth} ${monthName} พ.ศ. ${beYear}`;
 
-  const decoLine = "๐•°❀°•๐━━━━━━๐•°❀°•๐";
+  const decoLine = "๐•°❀°•๐━━━━━━๐•°❀°•๐•°❀°•๐━━━━━━๐•°❀°•๐•°❀°•๐━━━━━━๐•°❀°•๐";
 
   const topLines = [
     title,
