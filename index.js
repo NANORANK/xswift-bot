@@ -229,7 +229,7 @@ function buildCalendarEmbed(date) {
   const title = "✨ ปฏิทินไทยประจำวัน | xSwift Hub✨";
   const subtitle = `วันนี้ ☀️ ${weekdayName} ที่ ${dayOfMonth} ${monthName} พ.ศ. ${beYear}`;
 
-  const decoLine = "๐•°❀°•๐━━━━━━๐•°❀°•๐•°❀°•๐━━━━━━๐•°❀°•๐•°❀°•๐━━━━━━๐•°❀°•๐";
+  const decoLine = "๐•°❀°•๐━━━━━━•๐•๐━━━━━━๐•°❀°•๐๐";
 
   const topLines = [
     title,
