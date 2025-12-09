@@ -1,8 +1,7 @@
-// index.js - MASTER FULL VERSION (xSwift Hub | By Zemon Źx)
-
-//--------------------------------------------------------------
+// index.js - MASTER ULTRA VERSION (xSwift Hub | By Zemon Źx)
+// ------------------------------------------------------------
 //  WEB SERVER (KEEP ALIVE)
-//--------------------------------------------------------------
+// ------------------------------------------------------------
 const express = require("express");
 const app = express();
 const port = process.env.PORT || 8080;
@@ -10,12 +9,11 @@ const port = process.env.PORT || 8080;
 app.get("/", (req, res) => {
   res.send("Thai Calendar Bot is Alive 💗");
 });
-
 app.listen(port, () => console.log("Web server running on port", port));
 
-//--------------------------------------------------------------
+// ------------------------------------------------------------
 //  IMPORTS
-//--------------------------------------------------------------
+// ------------------------------------------------------------
 const {
   Client,
   GatewayIntentBits,
@@ -31,16 +29,16 @@ const {
 const cron = require("node-cron");
 const config = require("./bot_config");
 
-//--------------------------------------------------------------
+// ------------------------------------------------------------
 //  CLIENT
-//--------------------------------------------------------------
+// ------------------------------------------------------------
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
-//--------------------------------------------------------------
-//  TIMEZONE HANDLING
-//--------------------------------------------------------------
+// ------------------------------------------------------------
+//  TIMEZONE (THAI)
+// ------------------------------------------------------------
 function getThaiDate() {
   const now = new Date();
   const local = now.toLocaleString("en-US", { timeZone: "Asia/Bangkok" });
@@ -54,22 +52,22 @@ function keyDate(d) {
   return `${y}-${m}-${dd}`;
 }
 
-//--------------------------------------------------------------
-//  NAMES (Thai)
-//--------------------------------------------------------------
+// ------------------------------------------------------------
+//  THAI NAMES
+// ------------------------------------------------------------
 const thaiWeekdays = [
   "วันอาทิตย์", "วันจันทร์", "วันอังคาร",
   "วันพุธ", "วันพฤหัสบดี", "วันศุกร์", "วันเสาร์"
 ];
 
 const thaiMonths = [
-  "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
-  "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
+  "มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน",
+  "กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"
 ];
 
-//--------------------------------------------------------------
+// ------------------------------------------------------------
 //  COLORS OF WEEKDAY
-//--------------------------------------------------------------
+// ------------------------------------------------------------
 const colorOfDay = {
   0: { name: "สีแดง", emoji: "❤️" },
   1: { name: "สีเหลือง", emoji: "💛" },
@@ -80,9 +78,9 @@ const colorOfDay = {
   6: { name: "สีม่วง", emoji: "💜" }
 };
 
-//--------------------------------------------------------------
-//  CIRCLED DAY NUMBER
-//--------------------------------------------------------------
+// ------------------------------------------------------------
+//  CIRCLED NUMBERS (➊➋➌…)
+// ------------------------------------------------------------
 const circleNum = [
   "➊","➋","➌","➍","➎","➏","➐","➑","➒",
   "➓","➊➊","➊➋","➊➌","➊➍","➊➎","➊➏",
@@ -91,18 +89,28 @@ const circleNum = [
 ];
 
 function circle(n) {
-  return n >= 1 && n <= 31 ? circleNum[n - 1] : String(n);
+  return n >= 1 && n <= 31 ? circleNum[n - 1] : `${n}`;
 }
 
-//--------------------------------------------------------------
-//  FESTIVAL (Thai)
-//--------------------------------------------------------------
+// ------------------------------------------------------------
+//  THAI FESTIVAL SYSTEM (UPGRADED)
+// ------------------------------------------------------------
+
+// วันพระ (ง่าย) — ขึ้น/แรม 8,15,22,29
 function isWanPra(d) {
   const start = new Date(d.getFullYear(), d.getMonth(), 1);
   const diff = Math.floor((d - start) / 86400000) + 1;
-  return diff === 8 || diff === 15 || diff === 22 || diff === 29;
+  return [8, 15, 22, 29].includes(diff);
 }
 
+// ⭐ วันโกน = วันก่อนวันพระ
+function isWanKon(d) {
+  const tomorrow = new Date(d);
+  tomorrow.setDate(d.getDate() + 1);
+  return isWanPra(tomorrow);
+}
+
+// ตรุษจีน (กำหนดปี)
 function chineseNewYear(y) {
   const data = {
     2024: "2024-02-10",
@@ -112,6 +120,7 @@ function chineseNewYear(y) {
   return data[y] || null;
 }
 
+// วันพุทธศาสนาใหญ่ (2024–2026)
 const buddhistDays = {
   2024: {
     makha: "2024-02-24",
@@ -136,6 +145,7 @@ const buddhistDays = {
   }
 };
 
+// รวมวันสำคัญไทยแบบละเอียด
 function getSpecialThaiDays(d) {
   const y = d.getFullYear();
   const m = d.getMonth() + 1;
@@ -144,15 +154,22 @@ function getSpecialThaiDays(d) {
 
   let list = [];
 
+  // วันโกนก่อนวันพระ
+  if (isWanKon(d)) list.push("🌕 วันโกน");
+
+  // วันพระ
   if (isWanPra(d)) list.push("🪷 วันพระ");
 
-  const cny = chineseNewYear(y);
-  if (cny === key) list.push("🧧 ตรุษจีน");
+  // ตรุษจีน
+  if (chineseNewYear(y) === key) list.push("🧧 ตรุษจีน");
 
+  // ลอยกระทง
   if (m === 11 && dd === 15) list.push("🏮 ลอยกระทง");
 
+  // สงกรานต์
   if (m === 4 && dd >= 13 && dd <= 15) list.push("💦 สงกรานต์");
 
+  // วันสำคัญคงที่
   const fixed = {
     "01-01": "🎉 วันขึ้นปีใหม่",
     "02-14": "💘 วันวาเลนไทน์",
@@ -163,51 +180,48 @@ function getSpecialThaiDays(d) {
     "12-25": "🎄 คริสต์มาส",
     "10-31": "🎃 ฮาโลวีน"
   };
-
-  const mmdd = `${String(m).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
+  const mmdd = `${String(m).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
   if (fixed[mmdd]) list.push(fixed[mmdd]);
 
+  // วันพุทธศาสนาใหญ่
   const bd = buddhistDays[y];
   if (bd) {
-    if (bd.makha === key) list.push("🪔 วันมาฆบูชา");
-    if (bd.visakha === key) list.push("🕊 วันวิสาขบูชา");
-    if (bd.asarnha === key) list.push("✨ วันอาสาฬหบูชา");
-    if (bd.khao === key) list.push("🙏 วันเข้าพรรษา");
-    if (bd.ok === key) list.push("📿 วันออกพรรษา");
+    if (key === bd.makha) list.push("🪔 วันมาฆบูชา");
+    if (key === bd.visakha) list.push("🕊 วันวิสาขบูชา");
+    if (key === bd.asarnha) list.push("✨ วันอาสาฬหบูชา");
+    if (key === bd.khao) list.push("🙏 วันเข้าพรรษา");
+    if (key === bd.ok) list.push("📿 วันออกพรรษา");
   }
 
   return list.length ? list : ["🌸 ไม่มีวันสำคัญ"];
 }
 
-//--------------------------------------------------------------
+// ------------------------------------------------------------
 //  CALENDAR GENERATOR
-//--------------------------------------------------------------
+// ------------------------------------------------------------
 function generateCalendar(date) {
   const y = date.getFullYear();
   const be = y + 543;
   const m = date.getMonth();
   const d = date.getDate();
-  const wd = date.getDay();
-
+  const weekdayName = thaiWeekdays[date.getDay()];
   const monthName = thaiMonths[m];
-  const weekdayName = thaiWeekdays[wd];
 
   const first = new Date(y, m, 1);
   const days = new Date(y, m + 1, 0).getDate();
 
-  const js = first.getDay();
-  const offset = (js + 6) % 7;
+  const offset = (first.getDay() + 6) % 7;
 
-  const lines = [];
+  let lines = [];
+  lines.push("จ  อ  พ  พฤ ศ  ส  อา");
+
   let row = [];
   let cur = 1;
-
-  lines.push("จ  อ  พ  พฤ ศ  ส  อา");
 
   for (let i = 0; i < 7; i++) {
     if (i < offset) row.push("   ");
     else {
-      row.push((cur === d ? circle(cur) : String(cur)).padStart(2," ") + " ");
+      row.push((cur === d ? circle(cur) : `${cur}`).padStart(2, " ") + " ");
       cur++;
     }
   }
@@ -218,7 +232,7 @@ function generateCalendar(date) {
     for (let i = 0; i < 7; i++) {
       if (cur > days) row.push("   ");
       else {
-        row.push((cur === d ? circle(cur) : String(cur)).padStart(2," ") + " ");
+        row.push((cur === d ? circle(cur) : `${cur}`).padStart(2, " ") + " ");
         cur++;
       }
     }
@@ -226,40 +240,35 @@ function generateCalendar(date) {
   }
 
   return {
-    monthName,
     weekdayName,
+    monthName,
     be,
     day: d,
     text: lines.join("\n")
   };
 }
 
-//--------------------------------------------------------------
+// ------------------------------------------------------------
 //  EMBED BUILDER
-//--------------------------------------------------------------
+// ------------------------------------------------------------
 const IMAGE_URL =
   "https://cdn.discordapp.com/attachments/1443746157082706054/1447963237919227934/Unknown.gif";
 
 function buildEmbed(date) {
   const cal = generateCalendar(date);
-  const colorInfo = colorOfDay[date.getDay()];
+  const color = colorOfDay[date.getDay()];
   const specials = getSpecialThaiDays(date);
-
   const specialsLine = specials.join(" • ");
 
   const header =
     `✨ ปฏิทินไทยประจำวัน ✨\n` +
-    `วันนี้ ${cal.weekdayName} ที่ ${cal.day} ${cal.monthName} พ.ศ. ${cal.be}\n\n` +
-    `🎨 สีประจำวัน : ${colorInfo.name} ${colorInfo.emoji}\n` +
+    `วันนี้เป็น ${cal.weekdayName} ที่ ${cal.day} ${cal.monthName} พ.ศ. ${cal.be}\n\n` +
+    `🎨 สีประจำวัน : ${color.name} ${color.emoji}\n` +
     `📅 วันนี้ : ${specialsLine}\n` +
     `….::::•°✾°•::::….….::::•°✾°•::::….\n`;
 
-  const calendarBlock = "```txt\n" + cal.text + "\n```";
-
-  const combined =
-    header +
-    calendarBlock +
-    `\n🪷 วันสำคัญวันนี้ : ${specialsLine}`;
+  const combined = header + "```txt\n" + cal.text + "\n```\n" +
+    `🪷 วันสำคัญวันนี้ : ${specialsLine}`;
 
   return new EmbedBuilder()
     .setColor(0xff66cc)
@@ -270,9 +279,9 @@ function buildEmbed(date) {
     });
 }
 
-//--------------------------------------------------------------
-//  SEND DAILY
-//--------------------------------------------------------------
+// ------------------------------------------------------------
+//  SEND DAILY w/ NO DUPLICATES
+// ------------------------------------------------------------
 let lastSent = null;
 
 async function sendDaily(reason) {
@@ -282,13 +291,9 @@ async function sendDaily(reason) {
     const today = keyDate(now);
 
     if (lastSent === today) return;
-
     lastSent = today;
 
-    await ch.send({
-      content: "@everyone",
-      embeds: [buildEmbed(now)]
-    });
+    await ch.send({ content: "@everyone", embeds: [buildEmbed(now)] });
 
     console.log("ส่งปฏิทินแล้ว:", today, "|", reason);
   } catch (e) {
@@ -296,9 +301,9 @@ async function sendDaily(reason) {
   }
 }
 
-//--------------------------------------------------------------
-//  VOICE CONNECT
-//--------------------------------------------------------------
+// ------------------------------------------------------------
+//  VOICE SYSTEM
+// ------------------------------------------------------------
 async function connectVoice() {
   const id = process.env.VOICE_ID;
   if (!id) return;
@@ -323,9 +328,9 @@ async function connectVoice() {
   }
 }
 
-//--------------------------------------------------------------
+// ------------------------------------------------------------
 //  READY
-//--------------------------------------------------------------
+// ------------------------------------------------------------
 client.once("ready", async () => {
   console.log("ล็อกอินเป็น", client.user.tag, "แล้วจ้า 💗");
 
