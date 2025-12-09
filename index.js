@@ -1,6 +1,6 @@
 // ==========================
 //  Thai Calendar Bot | xSwift Hub
-//  By Zemon Źx 💗
+//  By Zemon Źx 
 // ==========================
 
 const express = require("express");
