@@ -166,11 +166,9 @@ function getSpecialThaiDays(d) {
   const cny = chineseNewYear(y);
   if (cny && key === cny) list.push("🧧 ตรุษจีน");
 
-  // ลอยกระทง (เพ็ญเดือน 12)
-  if (m === 11 && dd >= 1 && dd <= 30) {  
-    if (thaiWeekdays[d.getDay()] && dd === 15) {
-      list.push("🏮 ลอยกระทง");
-    }
+  // ลอยกระทง (เพ็ญเดือน 12) — simple approx
+  if (m === 11 && dd === 15) {
+    list.push("🏮 ลอยกระทง");
   }
 
   // วันสงกรานต์
@@ -185,7 +183,7 @@ function getSpecialThaiDays(d) {
     "05-01": "🔧 วันแรงงาน",
     "12-05": "💛 วันพ่อแห่งชาติ",
     "08-12": "💙 วันแม่แห่งชาติ",
-    "10-10": "📜 วันรัฐธรรมนูญ",
+    "12-10": "📜 วันรัฐธรรมนูญ", // แก้เป็น 10 ธันวาคม
     "12-25": "🎄 คริสต์มาส",
     "10-31": "🎃 ฮาโลวีน"
   };
@@ -224,18 +222,18 @@ function generateCalendar(date) {
   const js = first.getDay();
   const offset = (js + 6) % 7;
 
-  const headers = ["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"];
-
   const lines = [];
   let row = [];
   let cur = 1;
 
+  // header ของตาราง
   lines.push("จ  อ  พ  พฤ ศ  ส  อา");
 
-  // first row
+  // แถวแรก
   for (let i = 0; i < 7; i++) {
-    if (i < offset) row.push("   ");
-    else {
+    if (i < offset) {
+      row.push("   ");
+    } else {
       const t = cur === d ? circle(cur) : String(cur);
       row.push(t.toString().padStart(2, " ") + " ");
       cur++;
@@ -243,12 +241,13 @@ function generateCalendar(date) {
   }
   lines.push(row.join(""));
 
-  // other rows
+  // แถวต่อ ๆ ไป
   while (cur <= days) {
     row = [];
     for (let i = 0; i < 7; i++) {
-      if (cur > days) row.push("   ");
-      else {
+      if (cur > days) {
+        row.push("   ");
+      } else {
         const t = cur === d ? circle(cur) : String(cur);
         row.push(t.toString().padStart(2, " ") + " ");
         cur++;
@@ -278,18 +277,22 @@ function buildEmbed(date) {
   const colorInfo = colorOfDay[wd];
   const specials = getSpecialThaiDays(date);
 
+  // แปลง list วันสำคัญให้เป็นบรรทัดเดียว
+  const specialsLine = specials.join(" • ");
+
   const header =
     `✨ ปฏิทินไทยประจำวัน ✨\n` +
     `วันนี้เป็น ${cal.weekdayName} ที่ ${cal.day} ${cal.monthName} พ.ศ. ${cal.be}\n\n` +
     `🎨 สีประจำวัน : ${colorInfo.name} ${colorInfo.emoji}\n` +
-    `📅 วันนี้ :\n` +
-    specials.map(s => `• ${s}`).join("\n") +
-    `\n….::::•°✾°•::::….….::::•°✾°•::::….\n`;
+    `📅 วันนี้ : ${specialsLine}\n` +
+    `….::::•°✾°•::::….….::::•°✾°•::::….\n`;
 
-  const calendarBlock =
-    "```txt\n" + cal.text + "\n```";
+  const calendarBlock = "```txt\n" + cal.text + "\n```";
 
-  const combined = header + calendarBlock;
+  const combined =
+    header +
+    calendarBlock +
+    `\n\n🪷 วันสำคัญวันนี้ : ${specialsLine}`;
 
   return new EmbedBuilder()
     .setColor(0xff66cc)
