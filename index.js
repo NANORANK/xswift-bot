@@ -1,4 +1,4 @@
-// index.js - MASTER ULTRA VERSION + RANK PANEL SYSTEM (ROLE OPTION)
+// index.js - MASTER ULTRA VERSION + RANK PANEL SYSTEM (ROLE OPTION) + BOT STATUS PANEL
 // (xSwift Hub | By Zemon Źx)
 // ------------------------------------------------------------
 
@@ -19,7 +19,9 @@ const {
   PermissionsBitField,
   SlashCommandBuilder,
   REST,
-  Routes
+  Routes,
+  StringSelectMenuBuilder,
+  ChannelType
 } = require("discord.js");
 
 const {
@@ -34,7 +36,9 @@ const config = require("./bot_config");
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildPresences
   ]
 });
 
@@ -362,7 +366,7 @@ async function connectVoice() {
 }
 
 /////////////////////////////////////////////////////////////////
-// ⚡ NEW SYSTEM — ADMIN RANK PANEL (ROLE OPTION)
+// ⚡ RANK PANEL SYSTEM (ROLE OPTION)
 //  /rankpanel role:@ยศ
 /////////////////////////////////////////////////////////////////
 const PANEL_IMAGE =
@@ -370,6 +374,17 @@ const PANEL_IMAGE =
 const WELCOME_IMAGE =
   "https://cdn.discordapp.com/attachments/1445301442092072980/1448043511558570258/1be0c476c8a40fbe206e2fbc6c5d213c.jpg";
 
+/////////////////////////////////////////////////////////////////
+// ⚡ BOT STATUS PANEL IMAGES
+/////////////////////////////////////////////////////////////////
+const STATUS_PANEL_IMAGE =
+  "https://cdn.discordapp.com/attachments/1443746157082706054/1448123647524081835/Unknown.gif";
+const STATUS_PANEL_ICON =
+  "https://cdn.discordapp.com/attachments/1443746157082706054/1448123939250507887/CFA9E582-8035-4C58-9A79-E1269A5FB025.png";
+
+/////////////////////////////////////////////////////////////////
+// Slash Commands Register
+/////////////////////////////////////////////////////////////////
 async function registerCommands() {
   const commands = [
     new SlashCommandBuilder()
@@ -380,6 +395,16 @@ async function registerCommands() {
           .setName("role")
           .setDescription("ยศที่ต้องการให้เมื่อกดปุ่มรับยศ")
           .setRequired(true)
+      ),
+    new SlashCommandBuilder()
+      .setName("botpanel")
+      .setDescription("สร้าง Panel แสดงสถานะบอทในเซิร์ฟ (เฉพาะแอดมิน)")
+      .addChannelOption((opt) =>
+        opt
+          .setName("channel")
+          .setDescription("ห้องที่จะให้บอทส่ง Panel สถานะ")
+          .addChannelTypes(ChannelType.GuildText)
+          .setRequired(true)
       )
   ].map((c) => c.toJSON());
 
@@ -387,105 +412,328 @@ async function registerCommands() {
   await rest.put(Routes.applicationCommands(client.user.id), {
     body: commands
   });
-  console.log("REGISTERED /rankpanel");
+  console.log("REGISTERED /rankpanel + /botpanel");
 }
 
-// Slash command handler
-client.on("interactionCreate", async (i) => {
-  if (!i.isChatInputCommand()) return;
+/////////////////////////////////////////////////////////////////
+// BOT STATUS PANEL DATA
+/////////////////////////////////////////////////////////////////
+const botPanels = new Map(); // guildId -> { channelId, messageId, botIds, maintenance:Set }
 
-  if (i.commandName === "rankpanel") {
-    if (
-      !i.member.permissions.has(
-        PermissionsBitField.Flags.Administrator
-      )
-    ) {
-      return i.reply({
-        content: "❌ ต้องเป็นแอดมินนะค้าบ",
-        ephemeral: true
-      });
+function buildBotPanelEmbed(guild, panelData) {
+  const lines = [];
+
+  for (const botId of panelData.botIds) {
+    const member = guild.members.cache.get(botId);
+    const mention = `<@${botId}>`;
+
+    let statusText = "ออฟไลน์อยู่ 🔴";
+    const presence = member?.presence;
+    const isOnline =
+      presence && presence.status && presence.status !== "offline";
+
+    if (panelData.maintenance.has(botId)) {
+      statusText = "กำลังปรับปรุงอยู่ 🛠️ | ออฟไลน์ 🔴";
+    } else if (isOnline) {
+      statusText = "ออนไลน์อยู่ 🟢";
     }
 
-    const role = i.options.getRole("role");
-    if (!role) {
-      return i.reply({
-        content: "❌ ไม่พบยศที่เลือกนะค้าบ",
-        ephemeral: true
-      });
-    }
-
-    const embed = new EmbedBuilder()
-      .setColor(0xf772d4)
-      .setTitle("🌸 รับยศของคุณได้เลย!")
-      .setDescription(
-        `กดปุ่มด้านล่างเพื่อรับยศ **${role.name}** เข้าสู่ระบบ xSwift Hub นะค้าบ 💗`
-      )
-      .setImage(PANEL_IMAGE)
-      .setFooter({ text: "xSwift Hub | By Zemon Źx" });
-
-    // encode roleId ใน customId
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`rank_accept_${role.id}`)
-        .setStyle(ButtonStyle.Success)
-        .setLabel("💗 รับยศเลย!")
-    );
-
-    await i.reply({ embeds: [embed], components: [row] });
+    lines.push(`• ${mention} — ${statusText}`);
   }
-});
 
-// Button handler
-client.on("interactionCreate", async (i) => {
-  if (!i.isButton()) return;
-  if (!i.customId.startsWith("rank_accept_")) return;
+  const desc = `🛰️ สถานะบอทในเซิร์ฟเวอร์ **${guild.name}**\n\n${lines.join(
+    "\n"
+  )}\n\n> ปุ่มด้านล่างใช้สำหรับแอดมินตั้งสถานะบอทว่า “กำลังปรับปรุงอยู่ 🛠️” น้า 💗`;
 
-  const roleId = i.customId.replace("rank_accept_", "");
-  const role = i.guild.roles.cache.get(roleId);
-  if (!role) {
-    return i.reply({
-      content: "❌ ยศนี้ถูกลบหรือหาไม่เจอแล้วน้า",
-      ephemeral: true
+  return new EmbedBuilder()
+    .setColor(0x00ffc8)
+    .setTitle("🌸 xSwift Hub | Bot Status Panel")
+    .setDescription(desc)
+    .setImage(STATUS_PANEL_IMAGE)
+    .setThumbnail(STATUS_PANEL_ICON)
+    .setFooter({
+      text: "อัปเดตสถานะอัตโนมัติแบบเรียลไทม์ • By Zemon Źx"
     });
-  }
+}
+
+async function updateBotPanel(guildId) {
+  const panel = botPanels.get(guildId);
+  if (!panel) return;
 
   try {
-    await i.member.roles.add(role);
+    const guild = await client.guilds.fetch(guildId);
+    await guild.members.fetch({ user: panel.botIds });
 
-    // ส่งแจ้งเตือนไปห้อง welcomeLog ตาม config
-    if (config.welcomeLog) {
+    const channel = await client.channels.fetch(panel.channelId);
+    if (!channel || !channel.isTextBased()) return;
+
+    const msg = await channel.messages.fetch(panel.messageId);
+    const embed = buildBotPanelEmbed(guild, panel);
+
+    await msg.edit({ embeds: [embed] });
+  } catch (err) {
+    console.log("อัปเดต Bot Panel ล้มเหลว:", err.message);
+  }
+}
+
+/////////////////////////////////////////////////////////////////
+// Interaction Handler (Slash + Button + Select)
+/////////////////////////////////////////////////////////////////
+client.on("interactionCreate", async (i) => {
+  // Slash Commands
+  if (i.isChatInputCommand()) {
+    // ===== /rankpanel =====
+    if (i.commandName === "rankpanel") {
+      if (
+        !i.member.permissions.has(PermissionsBitField.Flags.Administrator)
+      ) {
+        return i.reply({
+          content: "❌ ต้องเป็นแอดมินนะค้าบ",
+          ephemeral: true
+        });
+      }
+
+      const role = i.options.getRole("role");
+      if (!role) {
+        return i.reply({
+          content: "❌ ไม่พบยศที่เลือกนะค้าบ",
+          ephemeral: true
+        });
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(0xf772d4)
+        .setTitle("🌸 รับยศของคุณได้เลย!")
+        .setDescription(
+          `กดปุ่มด้านล่างเพื่อรับยศ **${role.name}** เข้าสู่ระบบ xSwift Hub นะค้าบ 💗`
+        )
+        .setImage(PANEL_IMAGE)
+        .setFooter({ text: "xSwift Hub | By Zemon Źx" });
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`rank_accept_${role.id}`)
+          .setStyle(ButtonStyle.Success)
+          .setLabel("💗 รับยศเลย!")
+      );
+
+      return i.reply({ embeds: [embed], components: [row] });
+    }
+
+    // ===== /botpanel =====
+    if (i.commandName === "botpanel") {
+      if (
+        !i.member.permissions.has(PermissionsBitField.Flags.Administrator)
+      ) {
+        return i.reply({
+          content: "❌ ต้องเป็นแอดมินนะค้าบ",
+          ephemeral: true
+        });
+      }
+
+      const targetChannel = i.options.getChannel("channel");
+      if (!targetChannel || !targetChannel.isTextBased()) {
+        return i.reply({
+          content: "❌ กรุณาเลือกห้องข้อความปกตินะค้าบ",
+          ephemeral: true
+        });
+      }
+
+      await i.guild.members.fetch();
+      const bots = i.guild.members.cache.filter((m) => m.user.bot);
+
+      if (!bots.size) {
+        return i.reply({
+          content: "❌ เซิร์ฟนี้ยังไม่มีบอทให้เช็กสถานะเลยน้า",
+          ephemeral: true
+        });
+      }
+
+      const panelData = {
+        channelId: targetChannel.id,
+        messageId: null,
+        botIds: bots.map((m) => m.id),
+        maintenance: new Set()
+      };
+
+      const embed = buildBotPanelEmbed(i.guild, panelData);
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`botpanel_manage_${i.guild.id}`)
+          .setStyle(ButtonStyle.Secondary)
+          .setLabel("🛠️ ตั้งสถานะกำลังปรับปรุง")
+      );
+
+      const msg = await targetChannel.send({
+        embeds: [embed],
+        components: [row]
+      });
+
+      panelData.messageId = msg.id;
+      botPanels.set(i.guild.id, panelData);
+
+      return i.reply({
+        content: `✅ สร้าง Bot Status Panel ใน ${targetChannel} เรียบร้อยค้าบ`,
+        ephemeral: true
+      });
+    }
+
+    return;
+  }
+
+  // Buttons
+  if (i.isButton()) {
+    // ===== ปุ่มรับยศ =====
+    if (i.customId.startsWith("rank_accept_")) {
+      const roleId = i.customId.replace("rank_accept_", "");
+      const role = i.guild.roles.cache.get(roleId);
+      if (!role) {
+        return i.reply({
+          content: "❌ ยศนี้ถูกลบหรือหาไม่เจอแล้วน้า",
+          ephemeral: true
+        });
+      }
+
       try {
-        const logChannel = await client.channels.fetch(
-          config.welcomeLog
-        );
-        if (logChannel && logChannel.isTextBased()) {
-          const e = new EmbedBuilder()
-            .setColor(0xff99dd)
-            .setTitle("🎉 ยินดีต้อนรับสมาชิกใหม่!")
-            .setDescription(
-              `สวัสดี ${i.member} !\nคุณได้รับยศ **${role.name}** เรียบร้อยแล้วนะค้าบ 💗\nขอให้สนุกไปกับ xSwift Hub น้าา 🌸`
-            )
-            .setImage(WELCOME_IMAGE)
-            .setFooter({ text: "xSwift Hub | By Zemon Źx" });
+        await i.member.roles.add(role);
 
-          await logChannel.send({ embeds: [e] });
+        if (config.welcomeLog) {
+          try {
+            const logChannel = await client.channels.fetch(
+              config.welcomeLog
+            );
+            if (logChannel && logChannel.isTextBased()) {
+              const e = new EmbedBuilder()
+                .setColor(0xff99dd)
+                .setTitle("🎉 ยินดีต้อนรับสมาชิกใหม่!")
+                .setDescription(
+                  `สวัสดี ${i.member} !\nคุณได้รับยศ **${role.name}** เรียบร้อยแล้วนะค้าบ 💗\nขอให้สนุกไปกับ xSwift Hub น้าา 🌸`
+                )
+                .setImage(WELCOME_IMAGE)
+                .setFooter({ text: "xSwift Hub | By Zemon Źx" });
+
+              await logChannel.send({ embeds: [e] });
+            }
+          } catch (err) {
+            console.log(
+              "ส่งข้อความห้อง welcomeLog ไม่สำเร็จ:",
+              err.message
+            );
+          }
         }
+
+        return i.reply({
+          content: "💗 รับยศเรียบร้อยค้าบ!",
+          ephemeral: true
+        });
       } catch (err) {
-        console.log("ส่งข้อความห้อง welcomeLog ไม่สำเร็จ:", err.message);
+        console.error("ให้ยศไม่สำเร็จ:", err);
+        return i.reply({
+          content: "❌ ให้ยศไม่สำเร็จ ลองใหม่อีกครั้งน้า",
+          ephemeral: true
+        });
       }
     }
 
-    await i.reply({
-      content: "💗 รับยศเรียบร้อยค้าบ!",
-      ephemeral: true
-    });
-  } catch (err) {
-    console.error("ให้ยศไม่สำเร็จ:", err);
-    await i.reply({
-      content: "❌ ให้ยศไม่สำเร็จ ลองใหม่อีกครั้งน้า",
-      ephemeral: true
-    });
+    // ===== ปุ่มจัดการ Bot Panel =====
+    if (i.customId === `botpanel_manage_${i.guild.id}`) {
+      if (
+        !i.member.permissions.has(PermissionsBitField.Flags.Administrator)
+      ) {
+        return i.reply({
+          content: "❌ ปุ่มนี้ให้แอดมินกดเท่านั้นนะค้าบ",
+          ephemeral: true
+        });
+      }
+
+      const panel = botPanels.get(i.guild.id);
+      if (!panel) {
+        return i.reply({
+          content:
+            "❌ ยังไม่มี Bot Status Panel สำหรับเซิร์ฟนี้นะ ลองใช้คำสั่ง /botpanel ก่อนน้า",
+          ephemeral: true
+        });
+      }
+
+      const options = panel.botIds
+        .map((id) => {
+          const member = i.guild.members.cache.get(id);
+          const label = member ? member.user.username : `Bot ${id}`;
+          const inMaint = panel.maintenance.has(id);
+          return {
+            label,
+            value: id,
+            description: inMaint
+              ? "ยกเลิกสถานะกำลังปรับปรุง"
+              : "ตั้งให้กำลังปรับปรุง"
+          };
+        })
+        .slice(0, 25);
+
+      const select = new StringSelectMenuBuilder()
+        .setCustomId("botpanel_select")
+        .setPlaceholder("เลือกบอทที่จะสลับสถานะ 🛠️ / ปกติ")
+        .addOptions(options);
+
+      const row = new ActionRowBuilder().addComponents(select);
+
+      return i.reply({
+        content: "เลือกบอทที่ต้องการสลับสถานะกำลังปรับปรุงนะค้าบ 💗",
+        components: [row],
+        ephemeral: true
+      });
+    }
+
+    return;
   }
+
+  // Select Menu
+  if (i.isStringSelectMenu()) {
+    if (i.customId === "botpanel_select") {
+      if (
+        !i.member.permissions.has(PermissionsBitField.Flags.Administrator)
+      ) {
+        return i.reply({
+          content: "❌ เฉพาะแอดมินเท่านั้นน้า",
+          ephemeral: true
+        });
+      }
+
+      const panel = botPanels.get(i.guild.id);
+      if (!panel) {
+        return i.update({
+          content: "❌ ไม่มี Bot Status Panel แล้ว (อาจถูกลบไปแล้ว)",
+          components: []
+        });
+      }
+
+      for (const id of i.values) {
+        if (panel.maintenance.has(id)) panel.maintenance.delete(id);
+        else panel.maintenance.add(id);
+      }
+
+      await updateBotPanel(i.guild.id);
+
+      return i.update({
+        content: "✅ อัปเดตสถานะบอทเรียบร้อยค้าบ",
+        components: []
+      });
+    }
+  }
+});
+
+/////////////////////////////////////////////////////////////////
+// Presence Update -> Refresh Bot Panel
+/////////////////////////////////////////////////////////////////
+client.on("presenceUpdate", async (oldP, newP) => {
+  const p = newP || oldP;
+  if (!p?.user?.bot) return;
+  const guildId = p.guild?.id;
+  if (!guildId) return;
+  if (!botPanels.has(guildId)) return;
+
+  await updateBotPanel(guildId);
 });
 
 /////////////////////////////////////////////////////////////////
