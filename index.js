@@ -335,31 +335,7 @@ async function sendDaily(reason) {
 }
 
 ///////////////////////////////////////////////////////////////
-// STATIC VOICE JOIN (CALENDAR BOT)
-///////////////////////////////////////////////////////////////
-async function connectVoice() {
-  if (!process.env.VOICE_ID) return;
-  try {
-    const ch = await client.channels.fetch(process.env.VOICE_ID);
-    if (!ch || !ch.isVoiceBased()) return;
-
-    const conn = joinVoiceChannel({
-      channelId: ch.id,
-      guildId: ch.guild.id,
-      adapterCreator: ch.guild.voiceAdapterCreator,
-      selfDeaf: true
-    });
-
-    conn.on("error", (e) => console.log("VOICE ERROR", e.message));
-    await entersState(conn, VoiceConnectionStatus.Ready, 15000);
-    console.log("เข้าห้องเสียงสำเร็จ 💗 (static presence)");
-  } catch (e) {
-    console.log("เข้าห้องเสียงล้มเหลว:", e.message);
-  }
-}
-
-///////////////////////////////////////////////////////////////
-// RANK PANEL CONFIG
+// ⚡ RANK PANEL CONFIG
 ///////////////////////////////////////////////////////////////
 const PANEL_IMAGE =
   "https://cdn.discordapp.com/attachments/1445301442092072980/1448043469015613470/IMG_4817.gif";
@@ -367,7 +343,7 @@ const WELCOME_IMAGE =
   "https://cdn.discordapp.com/attachments/1445301442092072980/1448043511558570258/1be0c476c8a40fbe206e2fbc6c5d213c.jpg";
 
 ///////////////////////////////////////////////////////////////
-// BOT STATUS PANEL IMAGES
+// ⚡ BOT STATUS PANEL IMAGES
 ///////////////////////////////////////////////////////////////
 const STATUS_PANEL_IMAGE =
   "https://cdn.discordapp.com/attachments/1443746157082706054/1448123647524081835/Unknown.gif";
@@ -375,14 +351,14 @@ const STATUS_PANEL_ICON =
   "https://cdn.discordapp.com/attachments/1443746157082706054/1448123939250507887/CFA9E582-8035-4C58-9A79-E1269A5FB025.png";
 
 ///////////////////////////////////////////////////////////////
-// MUSIC PANEL IMAGES
+// ⚡ MUSIC PANEL IMAGES
 ///////////////////////////////////////////////////////////////
 const MUSIC_BAR_IMAGE =
   "https://cdn.discordapp.com/attachments/1443746157082706054/1448167924375486485/IMG_8326-1.gif";
 const MUSIC_ICON_IMAGE =
   "https://cdn.discordapp.com/attachments/1443746157082706054/1448169010159157268/Unknown.gif";
 const MUSIC_FALLBACK_THUMB =
-  "https://i.ytimg.com/vi/5qap5aO4i9A/maxresdefault.jpg"; // สำรองถ้าไม่มี thumbnail
+  "https://i.ytimg.com/vi/5qap5aO4i9A/maxresdefault.jpg";
 
 ///////////////////////////////////////////////////////////////
 // SLASH COMMAND REGISTER
@@ -425,7 +401,6 @@ async function registerCommands() {
 ///////////////////////////////////////////////////////////////
 const botPanels = new Map(); // guildId -> { channelId, messageId, botIds, maintenance:Set }
 
-// หน้าตาข้อความใน Bot Status Panel
 function buildBotPanelEmbed(guild, panelData) {
   const blocks = [];
   let index = 1;
@@ -454,9 +429,7 @@ function buildBotPanelEmbed(guild, panelData) {
       modeLine = "⚙ โหมด : ปกติ";
     }
 
-    blocks.push(
-      `**${index}. ${mention}**\n${statusLine}\n${modeLine}`
-    );
+    blocks.push(`**${index}. ${mention}**\n${statusLine}\n${modeLine}`);
     index++;
   }
 
@@ -570,7 +543,6 @@ async function handleTrackEnd(guildId) {
   } else {
     queue.index += 1;
     if (queue.index >= queue.tracks.length) {
-      // จบคิว
       queue.index = queue.tracks.length - 1;
       return updateMusicPanel(guildId);
     }
@@ -639,33 +611,30 @@ function buildMusicEmbeds(guild) {
   const tracks = q.tracks;
   const current = tracks[q.index];
 
-  // QUEUE EMBED
   const queueEmbed = new EmbedBuilder()
     .setColor(0x00ffb3)
     .setTitle("Mitthu | Music Panel")
     .setThumbnail(MUSIC_ICON_IMAGE);
 
   if (!tracks.length) {
-    queueEmbed.setDescription("คิวเพลงว่างอยู่เลย ลองกดปุ่มด้านล่างเพื่อใส่ลิงก์เพลงจาก YouTube น้า 🎵");
+    queueEmbed.setDescription(
+      "คิวเพลงว่างอยู่เลย ลองกดปุ่มด้านล่างเพื่อใส่ลิงก์เพลงจาก YouTube น้า 🎵"
+    );
   } else {
     const lines = tracks.map((t, idx) => {
       const num = (idx + 1).toString().padStart(2, "0");
       const dur = t.duration ? Math.round(t.duration / 60) + "m" : "?m";
-      const prefix = idx === q.index ? "**[เล่นอยู่]**" : `[${num}]`;
+      const prefix = idx === q.index ? "**[กำลังเล่น]**" : `[${num}]`;
       return `${prefix} ${t.title} • ${dur}`;
     });
     queueEmbed.setDescription(
-      `• คิวเพลงตอนนี้: **${tracks.length}** เพลง\n` +
-      lines.join("\n")
+      `• คิวเพลงตอนนี้: **${tracks.length}** เพลง\n` + lines.join("\n")
     );
   }
 
   queueEmbed.setImage(MUSIC_BAR_IMAGE);
 
-  // NOW PLAYING EMBED
-  const nowEmbed = new EmbedBuilder()
-    .setColor(0x0099ff)
-    .setTitle("กำลังเล่นอยู่ตอนนี้");
+  const nowEmbed = new EmbedBuilder().setColor(0x0099ff).setTitle("Currently Playing");
 
   if (!current) {
     nowEmbed.setDescription("ยังไม่มีเพลงกำลังเล่นอยู่ 🎧");
@@ -673,24 +642,27 @@ function buildMusicEmbeds(guild) {
   } else {
     nowEmbed.setDescription(
       `**ชื่อเพลง:** ${current.title}\n` +
-      `**เจ้าของช่อง:** ${current.author}\n` +
-      `**ความยาว:** ${formatDuration(current.duration)}\n` +
-      `**ขอโดย:** <@${current.requestedBy}>`
+        `**เจ้าของช่อง:** ${current.author}\n` +
+        `**ความยาว:** ${formatDuration(current.duration)}\n` +
+        `**ขอโดย:** <@${current.requestedBy}>`
     );
     nowEmbed.setImage(current.thumbnail || MUSIC_FALLBACK_THUMB);
   }
 
-  // STATUS LINE
   const loopText =
-    q.loop === "one" ? "ลูปเพลงเดียว 🔂" :
-    q.loop === "all" ? "ลูปทั้งคิว 🔁" :
-    "ปิดลูป";
+    q.loop === "one"
+      ? "ลูปเพลงเดียว 🔂"
+      : q.loop === "all"
+      ? "ลูปทั้งคิว 🔁"
+      : "ปิดลูป";
+
   const player = q.player;
   const paused = player ? player.state.status === AudioPlayerStatus.Paused : false;
 
   nowEmbed.setFooter({
-    text:
-      `Paused: ${paused ? "Yes" : "No"} • Loop: ${loopText} • Volume: ${q.volume}%`
+    text: `Paused: ${paused ? "Yes" : "No"} • Loop: ${loopText} • Volume: ${
+      q.volume
+    }%`
   });
 
   return [queueEmbed, nowEmbed];
@@ -707,7 +679,6 @@ async function updateMusicPanel(guildId) {
 
     const msg = await channel.messages.fetch(panel.messageId);
     const embeds = buildMusicEmbeds(guild);
-
     const rows = buildMusicButtons();
 
     await msg.edit({ embeds, components: rows });
@@ -774,9 +745,7 @@ client.on("interactionCreate", async (i) => {
   if (i.isChatInputCommand()) {
     // ===== /rankpanel =====
     if (i.commandName === "rankpanel") {
-      if (
-        !i.member.permissions.has(PermissionsBitField.Flags.Administrator)
-      ) {
+      if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
         return i.reply({
           content: "❌ ต้องเป็นแอดมินนะค้าบ",
           ephemeral: true
@@ -812,9 +781,7 @@ client.on("interactionCreate", async (i) => {
 
     // ===== /botpanel =====
     if (i.commandName === "botpanel") {
-      if (
-        !i.member.permissions.has(PermissionsBitField.Flags.Administrator)
-      ) {
+      if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
         return i.reply({
           content: "❌ ต้องเป็นแอดมินนะค้าบ",
           ephemeral: true
@@ -871,9 +838,7 @@ client.on("interactionCreate", async (i) => {
 
     // ===== /setupmusic =====
     if (i.commandName === "setupmusic") {
-      if (
-        !i.member.permissions.has(PermissionsBitField.Flags.Administrator)
-      ) {
+      if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
         return i.reply({
           content: "❌ ต้องเป็นแอดมินนะค้าบ",
           ephemeral: true
@@ -918,9 +883,7 @@ client.on("interactionCreate", async (i) => {
 
         if (config.welcomeLog) {
           try {
-            const logChannel = await client.channels.fetch(
-              config.welcomeLog
-            );
+            const logChannel = await client.channels.fetch(config.welcomeLog);
             if (logChannel && logChannel.isTextBased()) {
               const e = new EmbedBuilder()
                 .setColor(0xff99dd)
@@ -934,10 +897,7 @@ client.on("interactionCreate", async (i) => {
               await logChannel.send({ embeds: [e] });
             }
           } catch (err) {
-            console.log(
-              "ส่งข้อความห้อง welcomeLog ไม่สำเร็จ:",
-              err.message
-            );
+            console.log("ส่งข้อความห้อง welcomeLog ไม่สำเร็จ:", err.message);
           }
         }
 
@@ -956,9 +916,7 @@ client.on("interactionCreate", async (i) => {
 
     // ===== ปุ่มจัดการ Bot Panel =====
     if (i.customId === `botpanel_manage_${i.guild.id}`) {
-      if (
-        !i.member.permissions.has(PermissionsBitField.Flags.Administrator)
-      ) {
+      if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
         return i.reply({
           content: "❌ ปุ่มนี้ให้แอดมินกดเท่านั้นนะค้าบ",
           ephemeral: true
@@ -1028,7 +986,10 @@ client.on("interactionCreate", async (i) => {
 
         if (["music_prev", "music_next", "music_stop", "music_playpause"].includes(i.customId)) {
           if (!queue.tracks.length) {
-            return i.reply({ content: "ตอนนี้ยังไม่มีเพลงในคิวน้า 🎵", ephemeral: true });
+            return i.reply({
+              content: "ตอนนี้ยังไม่มีเพลงในคิวน้า 🎵",
+              ephemeral: true
+            });
           }
 
           if (i.customId === "music_prev") {
@@ -1044,7 +1005,6 @@ client.on("interactionCreate", async (i) => {
           } else if (i.customId === "music_playpause") {
             const player = queue.player;
             if (!player) {
-              // เริ่มเล่นเพลงแรก
               const connection = await connectMusicVoice(i.member);
               await createPlayer(guildId, connection);
               await playCurrentTrack(guildId);
@@ -1061,7 +1021,10 @@ client.on("interactionCreate", async (i) => {
 
         if (i.customId === "music_vol_down" || i.customId === "music_vol_up") {
           if (!queue.player) {
-            return i.reply({ content: "ยังไม่มีเพลงกำลังเล่นอยู่เลยน้า 🎧", ephemeral: true });
+            return i.reply({
+              content: "ยังไม่มีเพลงกำลังเล่นอยู่เลยน้า 🎧",
+              ephemeral: true
+            });
           }
           const delta = i.customId === "music_vol_down" ? -10 : 10;
           queue.volume = Math.max(0, Math.min(200, queue.volume + delta));
@@ -1105,9 +1068,7 @@ client.on("interactionCreate", async (i) => {
   // Select Menu
   if (i.isStringSelectMenu()) {
     if (i.customId === "botpanel_select") {
-      if (
-        !i.member.permissions.has(PermissionsBitField.Flags.Administrator)
-      ) {
+      if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
         return i.reply({
           content: "❌ เฉพาะแอดมินเท่านั้นน้า",
           ephemeral: true
@@ -1143,28 +1104,36 @@ client.on("interactionCreate", async (i) => {
       const guildId = i.guild.id;
 
       try {
+        // ป้องกัน interaction หมดอายุก่อนเสร็จงาน
+        await i.deferReply({ ephemeral: true });
+
         const connection = await connectMusicVoice(i.member);
         const queue = getQueue(guildId);
         await createPlayer(guildId, connection);
         const track = await addTrack(i.guild, i.user, url);
 
-        // ถ้าไม่มีเพลงกำลังเล่น เริ่มจากเพลงนี้เลย
         if (queue.tracks.length === 1) {
           await playCurrentTrack(guildId);
         } else {
           await updateMusicPanel(guildId);
         }
 
-        return i.reply({
-          content: `✅ เพิ่มเพลง **${track.title}** ลงคิวแล้วค้าบ 🎵`,
-          ephemeral: true
+        await i.editReply({
+          content: `✅ เพิ่มเพลง **${track.title}** ลงคิวแล้วค้าบ 🎵`
         });
       } catch (err) {
-        console.log("ADD MUSIC ERROR:", err.message);
-        return i.reply({
-          content: `❌ เพิ่มเพลงไม่สำเร็จ: ${err.message}`,
-          ephemeral: true
-        });
+        console.log("ADD MUSIC ERROR:", err);
+
+        try {
+          const msg = `❌ เพิ่มเพลงไม่สำเร็จ: ${err.message}`;
+          if (i.deferred || i.replied) {
+            await i.editReply({ content: msg });
+          } else {
+            await i.reply({ content: msg, ephemeral: true });
+          }
+        } catch (e) {
+          console.log("FAILED TO SEND ERROR REPLY:", e.message);
+        }
       }
     }
   }
@@ -1190,7 +1159,7 @@ client.once("ready", async () => {
   console.log("ล็อกอินเป็น", client.user.tag, "แล้วจ้า 💗");
 
   await registerCommands();
-  await connectVoice();
+  // ❌ ตัด connectVoice ออกแล้ว ไม่จอยห้องเสียงอัตโนมัติ
   await sendDaily("on-ready");
 
   cron.schedule("0 0 * * *", () => sendDaily("cron"), {
