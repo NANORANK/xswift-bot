@@ -1,14 +1,20 @@
-// index.js - MASTER ULTRA VERSION + RANK PANEL SYSTEM (ROLE OPTION) + BOT STATUS PANEL
+// index.js - MASTER ULTRA ALL-IN-ONE
+// Calendar + Rank Panel + Bot Status Panel + Music Panel
 // (xSwift Hub | By Zemon Źx)
-// ------------------------------------------------------------
 
+///////////////////////////////////////////////////////////////
+// WEB SERVER (KEEP ALIVE)
+///////////////////////////////////////////////////////////////
 const express = require("express");
 const app = express();
 const port = process.env.PORT || 8080;
 
-app.get("/", (req, res) => res.send("Thai Calendar Bot is Alive 💗"));
+app.get("/", (req, res) => res.send("xSwift Hub Bot is Alive 💗"));
 app.listen(port, () => console.log("Web server running on port", port));
 
+///////////////////////////////////////////////////////////////
+// DISCORD IMPORTS
+///////////////////////////////////////////////////////////////
 const {
   Client,
   GatewayIntentBits,
@@ -21,33 +27,46 @@ const {
   REST,
   Routes,
   StringSelectMenuBuilder,
-  ChannelType
+  ChannelType,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle
 } = require("discord.js");
 
 const {
   joinVoiceChannel,
   entersState,
-  VoiceConnectionStatus
+  VoiceConnectionStatus,
+  createAudioPlayer,
+  createAudioResource,
+  AudioPlayerStatus,
+  NoSubscriberBehavior,
+  getVoiceConnection
 } = require("@discordjs/voice");
 
 const cron = require("node-cron");
+const play = require("play-dl");
 const config = require("./bot_config");
 
+///////////////////////////////////////////////////////////////
+// CLIENT
+///////////////////////////////////////////////////////////////
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildPresences
+    GatewayIntentBits.GuildPresences,
+    GatewayIntentBits.GuildVoiceStates
   ]
 });
 
-/////////////////////////////////////////////////////////////////
-// Util Thai Time
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
+// UTIL – THAI TIME
+///////////////////////////////////////////////////////////////
 function getThaiDate() {
   return new Date(
-    new Date().toLocaleString("en-US", { timeZone: "Asia/Bangkok" })
+    new Date().toLocaleString("en-US", { timeZone: config.timezone || "Asia/Bangkok" })
   );
 }
 
@@ -61,9 +80,9 @@ function keyDate(d) {
   );
 }
 
-/////////////////////////////////////////////////////////////////
-// Names
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
+// THAI NAMES
+///////////////////////////////////////////////////////////////
 const thaiWeekdays = [
   "วันอาทิตย์",
   "วันจันทร์",
@@ -89,9 +108,9 @@ const thaiMonths = [
   "ธันวาคม"
 ];
 
-/////////////////////////////////////////////////////////////////
-// Colors
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
+// COLORS OF DAY
+///////////////////////////////////////////////////////////////
 const colorOfDay = {
   0: { name: "สีแดง", emoji: "❤️" },
   1: { name: "สีเหลือง", emoji: "💛" },
@@ -102,46 +121,20 @@ const colorOfDay = {
   6: { name: "สีม่วง", emoji: "💜" }
 };
 
-/////////////////////////////////////////////////////////////////
-// Circle Numbers ➊➋➌
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
+// CIRCLED NUMBERS ➊➋➌
+///////////////////////////////////////////////////////////////
 const circleNum = [
-  "➊",
-  "➋",
-  "➌",
-  "➍",
-  "➎",
-  "➏",
-  "➐",
-  "➑",
-  "➒",
-  "➓",
-  "➊➊",
-  "➊➋",
-  "➊➌",
-  "➊➍",
-  "➊➎",
-  "➊➏",
-  "➊➐",
-  "➊➑",
-  "➊➒",
-  "➋➓",
-  "➋➊",
-  "➋➋",
-  "➋➌",
-  "➋➍",
-  "➋➎",
-  "➋➏",
-  "➋➐",
-  "➋➑",
-  "➋➒",
-  "➌➓"
+  "➊", "➋", "➌", "➍", "➎", "➏", "➐", "➑", "➒",
+  "➓", "➊➊", "➊➋", "➊➌", "➊➍", "➊➎", "➊➏",
+  "➊➐", "➊➑", "➊➒", "➋➓", "➋➊", "➋➋", "➋➌",
+  "➋➍", "➋➎", "➋➏", "➋➐", "➋➑", "➋➒", "➌➓"
 ];
-const circle = (n) => (n >= 1 && n <= 31 ? circleNum[n - 1] : String(n));
+const circle = n => (n >= 1 && n <= 31 ? circleNum[n - 1] : String(n));
 
-/////////////////////////////////////////////////////////////////
-// Festival System
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
+// THAI FESTIVAL SYSTEM
+///////////////////////////////////////////////////////////////
 function isWanPra(d) {
   const start = new Date(d.getFullYear(), d.getMonth(), 1);
   const diff = Math.floor((d - start) / 86400000) + 1;
@@ -227,9 +220,9 @@ function getSpecialThaiDays(d) {
   return list.length ? list : ["🌸 ไม่มีวันสำคัญ"];
 }
 
-/////////////////////////////////////////////////////////////////
-// Calendar Builder
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
+// CALENDAR BUILDER
+///////////////////////////////////////////////////////////////
 function generateCalendar(date) {
   const y = date.getFullYear();
   const be = y + 543;
@@ -285,13 +278,13 @@ function generateCalendar(date) {
   };
 }
 
-/////////////////////////////////////////////////////////////////
-// Embed for Calendar
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
+// CALENDAR EMBED
+///////////////////////////////////////////////////////////////
 const IMAGE_URL =
   "https://cdn.discordapp.com/attachments/1443746157082706054/1447963237919227934/Unknown.gif";
 
-function buildEmbed(date) {
+function buildCalendarEmbed(date) {
   const cal = generateCalendar(date);
   const color = colorOfDay[date.getDay()];
   const specials = getSpecialThaiDays(date).join(" • ");
@@ -320,9 +313,9 @@ function buildEmbed(date) {
     });
 }
 
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
 // DAILY SEND
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
 let lastSent = null;
 
 async function sendDaily(reason) {
@@ -334,21 +327,21 @@ async function sendDaily(reason) {
     if (lastSent === today) return;
     lastSent = today;
 
-    await ch.send({ content: "@everyone", embeds: [buildEmbed(now)] });
+    await ch.send({ content: "@everyone", embeds: [buildCalendarEmbed(now)] });
     console.log("ส่งปฏิทินแล้ว:", today, reason);
   } catch (e) {
     console.error("ส่งปฏิทินผิดพลาด:", e);
   }
 }
 
-/////////////////////////////////////////////////////////////////
-// VOICE
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
+// STATIC VOICE JOIN (CALENDAR BOT)
+///////////////////////////////////////////////////////////////
 async function connectVoice() {
   if (!process.env.VOICE_ID) return;
   try {
     const ch = await client.channels.fetch(process.env.VOICE_ID);
-    if (!ch.isVoiceBased()) return;
+    if (!ch || !ch.isVoiceBased()) return;
 
     const conn = joinVoiceChannel({
       channelId: ch.id,
@@ -359,32 +352,41 @@ async function connectVoice() {
 
     conn.on("error", (e) => console.log("VOICE ERROR", e.message));
     await entersState(conn, VoiceConnectionStatus.Ready, 15000);
-    console.log("เข้าห้องเสียงสำเร็จ 💗");
+    console.log("เข้าห้องเสียงสำเร็จ 💗 (static presence)");
   } catch (e) {
     console.log("เข้าห้องเสียงล้มเหลว:", e.message);
   }
 }
 
-/////////////////////////////////////////////////////////////////
-// ⚡ RANK PANEL SYSTEM (ROLE OPTION)
-//  /rankpanel role:@ยศ
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
+// RANK PANEL CONFIG
+///////////////////////////////////////////////////////////////
 const PANEL_IMAGE =
   "https://cdn.discordapp.com/attachments/1445301442092072980/1448043469015613470/IMG_4817.gif";
 const WELCOME_IMAGE =
   "https://cdn.discordapp.com/attachments/1445301442092072980/1448043511558570258/1be0c476c8a40fbe206e2fbc6c5d213c.jpg";
 
-/////////////////////////////////////////////////////////////////
-// ⚡ BOT STATUS PANEL IMAGES
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
+// BOT STATUS PANEL IMAGES
+///////////////////////////////////////////////////////////////
 const STATUS_PANEL_IMAGE =
   "https://cdn.discordapp.com/attachments/1443746157082706054/1448123647524081835/Unknown.gif";
 const STATUS_PANEL_ICON =
   "https://cdn.discordapp.com/attachments/1443746157082706054/1448123939250507887/CFA9E582-8035-4C58-9A79-E1269A5FB025.png";
 
-/////////////////////////////////////////////////////////////////
-// Slash Commands Register
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
+// MUSIC PANEL IMAGES
+///////////////////////////////////////////////////////////////
+const MUSIC_BAR_IMAGE =
+  "https://cdn.discordapp.com/attachments/1443746157082706054/1448167924375486485/IMG_8326-1.gif";
+const MUSIC_ICON_IMAGE =
+  "https://cdn.discordapp.com/attachments/1443746157082706054/1448169010159157268/Unknown.gif";
+const MUSIC_FALLBACK_THUMB =
+  "https://i.ytimg.com/vi/5qap5aO4i9A/maxresdefault.jpg"; // สำรองถ้าไม่มี thumbnail
+
+///////////////////////////////////////////////////////////////
+// SLASH COMMAND REGISTER
+///////////////////////////////////////////////////////////////
 async function registerCommands() {
   const commands = [
     new SlashCommandBuilder()
@@ -405,22 +407,25 @@ async function registerCommands() {
           .setDescription("ห้องที่จะให้บอทส่ง Panel สถานะ")
           .addChannelTypes(ChannelType.GuildText)
           .setRequired(true)
-      )
+      ),
+    new SlashCommandBuilder()
+      .setName("setupmusic")
+      .setDescription("สร้าง Music Panel สำหรับควบคุมเพลง (เฉพาะแอดมิน)")
   ].map((c) => c.toJSON());
 
   const rest = new REST({ version: "10" }).setToken(config.token);
   await rest.put(Routes.applicationCommands(client.user.id), {
     body: commands
   });
-  console.log("REGISTERED /rankpanel + /botpanel");
+  console.log("REGISTERED /rankpanel + /botpanel + /setupmusic");
 }
 
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
 // BOT STATUS PANEL DATA
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
 const botPanels = new Map(); // guildId -> { channelId, messageId, botIds, maintenance:Set }
 
-// ✅ ปรับหน้าตาข้อความใน Panel ตรงนี้อย่างเดียว
+// หน้าตาข้อความใน Bot Status Panel
 function buildBotPanelEmbed(guild, panelData) {
   const blocks = [];
   let index = 1;
@@ -450,9 +455,7 @@ function buildBotPanelEmbed(guild, panelData) {
     }
 
     blocks.push(
-      `**${index}. ${mention}**\n` +
-      `${statusLine}\n` +
-      `${modeLine}`
+      `**${index}. ${mention}**\n${statusLine}\n${modeLine}`
     );
     index++;
   }
@@ -494,9 +497,278 @@ async function updateBotPanel(guildId) {
   }
 }
 
-/////////////////////////////////////////////////////////////////
-// Interaction Handler (Slash + Button + Select)
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
+// MUSIC SYSTEM – QUEUE / PLAYER
+///////////////////////////////////////////////////////////////
+const musicQueues = new Map(); // guildId -> { tracks, index, loop, volume, player }
+const musicPanels = new Map(); // guildId -> { channelId, messageId }
+
+function getQueue(guildId) {
+  if (!musicQueues.has(guildId)) {
+    musicQueues.set(guildId, {
+      tracks: [],
+      index: 0,
+      loop: "off", // off | one | all
+      volume: 100,
+      player: null
+    });
+  }
+  return musicQueues.get(guildId);
+}
+
+async function connectMusicVoice(member) {
+  const vc = member.voice.channel;
+  if (!vc || !vc.isVoiceBased()) {
+    throw new Error("คุณต้องอยู่ในห้องเสียงก่อนน้า");
+  }
+
+  let connection = getVoiceConnection(vc.guild.id);
+  if (!connection) {
+    connection = joinVoiceChannel({
+      channelId: vc.id,
+      guildId: vc.guild.id,
+      adapterCreator: vc.guild.voiceAdapterCreator,
+      selfDeaf: true
+    });
+  }
+
+  await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+  return connection;
+}
+
+async function createPlayer(guildId, connection) {
+  const queue = getQueue(guildId);
+  if (queue.player) return queue.player;
+
+  const player = createAudioPlayer({
+    behaviors: {
+      noSubscriber: NoSubscriberBehavior.Pause
+    }
+  });
+
+  player.on(AudioPlayerStatus.Idle, async () => {
+    await handleTrackEnd(guildId);
+  });
+
+  player.on("error", (err) => {
+    console.log("PLAYER ERROR:", err.message);
+  });
+
+  connection.subscribe(player);
+  queue.player = player;
+  return player;
+}
+
+async function handleTrackEnd(guildId) {
+  const queue = getQueue(guildId);
+  if (!queue.tracks.length) return;
+
+  if (queue.loop === "one") {
+    // เล่นเพลงเดิมอีกรอบ
+  } else if (queue.loop === "all") {
+    queue.index = (queue.index + 1) % queue.tracks.length;
+  } else {
+    queue.index += 1;
+    if (queue.index >= queue.tracks.length) {
+      // จบคิว
+      queue.index = queue.tracks.length - 1;
+      return updateMusicPanel(guildId);
+    }
+  }
+
+  await playCurrentTrack(guildId);
+}
+
+async function playCurrentTrack(guildId) {
+  const queue = getQueue(guildId);
+  const track = queue.tracks[queue.index];
+  if (!track) return;
+
+  const connection = getVoiceConnection(guildId);
+  if (!connection) return;
+
+  const stream = await play.stream(track.url);
+  const resource = createAudioResource(stream.stream, {
+    inputType: stream.type,
+    inlineVolume: true
+  });
+  resource.volume.setVolume(queue.volume / 100);
+
+  const player = queue.player;
+  player.play(resource);
+
+  await updateMusicPanel(guildId);
+}
+
+async function addTrack(guild, user, url) {
+  if (!play.yt_validate(url)) {
+    throw new Error("ลิงก์นี้ไม่ใช่ YouTube URL ที่ถูกต้องน้า");
+  }
+
+  const info = await play.video_basic_info(url);
+  const v = info.video_details;
+
+  const track = {
+    url,
+    title: v.title,
+    author: v.channel?.name || "ไม่ทราบผู้สร้าง",
+    duration: v.durationInSec || 0,
+    thumbnail: v.thumbnails?.[0]?.url || MUSIC_FALLBACK_THUMB,
+    requestedBy: user.id
+  };
+
+  const queue = getQueue(guild.id);
+  queue.tracks.push(track);
+
+  if (queue.tracks.length === 1) {
+    queue.index = 0;
+  }
+
+  return track;
+}
+
+function formatDuration(sec) {
+  if (!sec || isNaN(sec)) return "ไม่ทราบเวลา";
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m} นาที ${s.toString().padStart(2, "0")} วิ`;
+}
+
+function buildMusicEmbeds(guild) {
+  const q = getQueue(guild.id);
+  const tracks = q.tracks;
+  const current = tracks[q.index];
+
+  // QUEUE EMBED
+  const queueEmbed = new EmbedBuilder()
+    .setColor(0x00ffb3)
+    .setTitle("Mitthu | Music Panel")
+    .setThumbnail(MUSIC_ICON_IMAGE);
+
+  if (!tracks.length) {
+    queueEmbed.setDescription("คิวเพลงว่างอยู่เลย ลองกดปุ่มด้านล่างเพื่อใส่ลิงก์เพลงจาก YouTube น้า 🎵");
+  } else {
+    const lines = tracks.map((t, idx) => {
+      const num = (idx + 1).toString().padStart(2, "0");
+      const dur = t.duration ? Math.round(t.duration / 60) + "m" : "?m";
+      const prefix = idx === q.index ? "**[เล่นอยู่]**" : `[${num}]`;
+      return `${prefix} ${t.title} • ${dur}`;
+    });
+    queueEmbed.setDescription(
+      `• คิวเพลงตอนนี้: **${tracks.length}** เพลง\n` +
+      lines.join("\n")
+    );
+  }
+
+  queueEmbed.setImage(MUSIC_BAR_IMAGE);
+
+  // NOW PLAYING EMBED
+  const nowEmbed = new EmbedBuilder()
+    .setColor(0x0099ff)
+    .setTitle("กำลังเล่นอยู่ตอนนี้");
+
+  if (!current) {
+    nowEmbed.setDescription("ยังไม่มีเพลงกำลังเล่นอยู่ 🎧");
+    nowEmbed.setImage(MUSIC_FALLBACK_THUMB);
+  } else {
+    nowEmbed.setDescription(
+      `**ชื่อเพลง:** ${current.title}\n` +
+      `**เจ้าของช่อง:** ${current.author}\n` +
+      `**ความยาว:** ${formatDuration(current.duration)}\n` +
+      `**ขอโดย:** <@${current.requestedBy}>`
+    );
+    nowEmbed.setImage(current.thumbnail || MUSIC_FALLBACK_THUMB);
+  }
+
+  // STATUS LINE
+  const loopText =
+    q.loop === "one" ? "ลูปเพลงเดียว 🔂" :
+    q.loop === "all" ? "ลูปทั้งคิว 🔁" :
+    "ปิดลูป";
+  const player = q.player;
+  const paused = player ? player.state.status === AudioPlayerStatus.Paused : false;
+
+  nowEmbed.setFooter({
+    text:
+      `Paused: ${paused ? "Yes" : "No"} • Loop: ${loopText} • Volume: ${q.volume}%`
+  });
+
+  return [queueEmbed, nowEmbed];
+}
+
+async function updateMusicPanel(guildId) {
+  const panel = musicPanels.get(guildId);
+  if (!panel) return;
+
+  try {
+    const guild = await client.guilds.fetch(guildId);
+    const channel = await client.channels.fetch(panel.channelId);
+    if (!channel || !channel.isTextBased()) return;
+
+    const msg = await channel.messages.fetch(panel.messageId);
+    const embeds = buildMusicEmbeds(guild);
+
+    const rows = buildMusicButtons();
+
+    await msg.edit({ embeds, components: rows });
+  } catch (err) {
+    console.log("อัปเดต Music Panel ล้มเหลว:", err.message);
+  }
+}
+
+function buildMusicButtons() {
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("music_add")
+      .setLabel("🎵 ใส่ลิงก์เพลง")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("music_prev")
+      .setEmoji("⏮️")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("music_playpause")
+      .setEmoji("⏯️")
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId("music_next")
+      .setEmoji("⏭️")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("music_stop")
+      .setEmoji("⏹️")
+      .setStyle(ButtonStyle.Danger)
+  );
+
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("music_vol_down")
+      .setEmoji("🔉")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("music_vol_up")
+      .setEmoji("🔊")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("music_loop_off")
+      .setLabel("⛔ ปิดลูป")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("music_loop_one")
+      .setLabel("🔂 ลูปเพลง")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("music_loop_all")
+      .setLabel("🔁 ลูปทั้งคิว")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  return [row1, row2];
+}
+
+///////////////////////////////////////////////////////////////
+// INTERACTION HANDLER (Slash + Button + Select + Modal)
+///////////////////////////////////////////////////////////////
 client.on("interactionCreate", async (i) => {
   // Slash Commands
   if (i.isChatInputCommand()) {
@@ -593,6 +865,34 @@ client.on("interactionCreate", async (i) => {
 
       return i.reply({
         content: `✅ สร้าง Bot Status Panel ใน ${targetChannel} เรียบร้อยค้าบ`,
+        ephemeral: true
+      });
+    }
+
+    // ===== /setupmusic =====
+    if (i.commandName === "setupmusic") {
+      if (
+        !i.member.permissions.has(PermissionsBitField.Flags.Administrator)
+      ) {
+        return i.reply({
+          content: "❌ ต้องเป็นแอดมินนะค้าบ",
+          ephemeral: true
+        });
+      }
+
+      const guild = i.guild;
+      const embeds = buildMusicEmbeds(guild);
+      const rows = buildMusicButtons();
+
+      const msg = await i.channel.send({ embeds, components: rows });
+
+      musicPanels.set(guild.id, {
+        channelId: i.channel.id,
+        messageId: msg.id
+      });
+
+      return i.reply({
+        content: "✅ สร้าง Music Panel เรียบร้อยค้าบ 🎶",
         ephemeral: true
       });
     }
@@ -703,6 +1003,102 @@ client.on("interactionCreate", async (i) => {
       });
     }
 
+    // ===== ปุ่ม MUSIC PANEL =====
+    if (i.customId.startsWith("music_")) {
+      const guildId = i.guild.id;
+      const queue = getQueue(guildId);
+
+      try {
+        if (i.customId === "music_add") {
+          const modal = new ModalBuilder()
+            .setCustomId("music_add_modal")
+            .setTitle("เพิ่มเพลงจากลิงก์ YouTube");
+
+          const input = new TextInputBuilder()
+            .setCustomId("music_url")
+            .setLabel("ใส่ลิงก์ YouTube ที่ต้องการเพิ่มลงคิว")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true);
+
+          const row = new ActionRowBuilder().addComponents(input);
+          modal.addComponents(row);
+
+          return i.showModal(modal);
+        }
+
+        if (["music_prev", "music_next", "music_stop", "music_playpause"].includes(i.customId)) {
+          if (!queue.tracks.length) {
+            return i.reply({ content: "ตอนนี้ยังไม่มีเพลงในคิวน้า 🎵", ephemeral: true });
+          }
+
+          if (i.customId === "music_prev") {
+            queue.index = Math.max(0, queue.index - 1);
+            await playCurrentTrack(guildId);
+          } else if (i.customId === "music_next") {
+            queue.index = Math.min(queue.tracks.length - 1, queue.index + 1);
+            await playCurrentTrack(guildId);
+          } else if (i.customId === "music_stop") {
+            const conn = getVoiceConnection(guildId);
+            if (conn) conn.destroy();
+            queue.player?.stop();
+          } else if (i.customId === "music_playpause") {
+            const player = queue.player;
+            if (!player) {
+              // เริ่มเล่นเพลงแรก
+              const connection = await connectMusicVoice(i.member);
+              await createPlayer(guildId, connection);
+              await playCurrentTrack(guildId);
+            } else if (player.state.status === AudioPlayerStatus.Playing) {
+              player.pause();
+            } else {
+              player.unpause();
+            }
+          }
+
+          await updateMusicPanel(guildId);
+          return i.deferUpdate();
+        }
+
+        if (i.customId === "music_vol_down" || i.customId === "music_vol_up") {
+          if (!queue.player) {
+            return i.reply({ content: "ยังไม่มีเพลงกำลังเล่นอยู่เลยน้า 🎧", ephemeral: true });
+          }
+          const delta = i.customId === "music_vol_down" ? -10 : 10;
+          queue.volume = Math.max(0, Math.min(200, queue.volume + delta));
+          if (queue.player.state.resource?.volume) {
+            queue.player.state.resource.volume.setVolume(queue.volume / 100);
+          }
+          await updateMusicPanel(guildId);
+          return i.reply({
+            content: `🔊 ปรับเสียงเป็น **${queue.volume}%** แล้วค้าบ`,
+            ephemeral: true
+          });
+        }
+
+        if (i.customId === "music_loop_off") {
+          queue.loop = "off";
+        } else if (i.customId === "music_loop_one") {
+          queue.loop = "one";
+        } else if (i.customId === "music_loop_all") {
+          queue.loop = "all";
+        }
+
+        if (i.customId.startsWith("music_loop_")) {
+          await updateMusicPanel(guildId);
+          return i.reply({
+            content: `🔁 ตั้งค่าโหมดลูปเป็น **${queue.loop}** แล้วค้าบ`,
+            ephemeral: true
+          });
+        }
+      } catch (err) {
+        console.log("MUSIC BUTTON ERROR:", err.message);
+        return i.reply({
+          content: "❌ มีอะไรผิดพลาดตอนใช้ Music Panel ลองใหม่อีกทีน้า",
+          ephemeral: true
+        });
+      }
+    }
+
     return;
   }
 
@@ -739,11 +1135,44 @@ client.on("interactionCreate", async (i) => {
       });
     }
   }
+
+  // Modal (เพิ่มเพลง)
+  if (i.isModalSubmit()) {
+    if (i.customId === "music_add_modal") {
+      const url = i.fields.getTextInputValue("music_url");
+      const guildId = i.guild.id;
+
+      try {
+        const connection = await connectMusicVoice(i.member);
+        const queue = getQueue(guildId);
+        await createPlayer(guildId, connection);
+        const track = await addTrack(i.guild, i.user, url);
+
+        // ถ้าไม่มีเพลงกำลังเล่น เริ่มจากเพลงนี้เลย
+        if (queue.tracks.length === 1) {
+          await playCurrentTrack(guildId);
+        } else {
+          await updateMusicPanel(guildId);
+        }
+
+        return i.reply({
+          content: `✅ เพิ่มเพลง **${track.title}** ลงคิวแล้วค้าบ 🎵`,
+          ephemeral: true
+        });
+      } catch (err) {
+        console.log("ADD MUSIC ERROR:", err.message);
+        return i.reply({
+          content: `❌ เพิ่มเพลงไม่สำเร็จ: ${err.message}`,
+          ephemeral: true
+        });
+      }
+    }
+  }
 });
 
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
 // Presence Update -> Refresh Bot Panel
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
 client.on("presenceUpdate", async (oldP, newP) => {
   const p = newP || oldP;
   if (!p?.user?.bot) return;
@@ -754,9 +1183,9 @@ client.on("presenceUpdate", async (oldP, newP) => {
   await updateBotPanel(guildId);
 });
 
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
 // READY
-/////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////
 client.once("ready", async () => {
   console.log("ล็อกอินเป็น", client.user.tag, "แล้วจ้า 💗");
 
@@ -765,7 +1194,7 @@ client.once("ready", async () => {
   await sendDaily("on-ready");
 
   cron.schedule("0 0 * * *", () => sendDaily("cron"), {
-    timezone: "Asia/Bangkok"
+    timezone: config.timezone || "Asia/Bangkok"
   });
 });
 
