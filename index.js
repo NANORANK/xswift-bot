@@ -420,30 +420,48 @@ async function registerCommands() {
 /////////////////////////////////////////////////////////////////
 const botPanels = new Map(); // guildId -> { channelId, messageId, botIds, maintenance:Set }
 
+// ✅ ปรับหน้าตาข้อความใน Panel ตรงนี้อย่างเดียว
 function buildBotPanelEmbed(guild, panelData) {
-  const lines = [];
+  const blocks = [];
+  let index = 1;
 
   for (const botId of panelData.botIds) {
     const member = guild.members.cache.get(botId);
     const mention = `<@${botId}>`;
 
-    let statusText = "ออฟไลน์อยู่ 🔴";
     const presence = member?.presence;
     const isOnline =
       presence && presence.status && presence.status !== "offline";
 
-    if (panelData.maintenance.has(botId)) {
-      statusText = "กำลังปรับปรุงอยู่ 🛠️ | ออฟไลน์ 🔴";
+    const inMaintenance = panelData.maintenance.has(botId);
+
+    let statusLine;
+    let modeLine;
+
+    if (inMaintenance) {
+      statusLine = "🛰 สถานะ : ออฟไลน์ 🔴";
+      modeLine = "⚙ โหมด : กำลังปรับปรุงอยู่ 🛠️";
     } else if (isOnline) {
-      statusText = "ออนไลน์อยู่ 🟢";
+      statusLine = "🛰 สถานะ : ออนไลน์อยู่ 🟢";
+      modeLine = "⚙ โหมด : ปกติ";
+    } else {
+      statusLine = "🛰 สถานะ : ออฟไลน์อยู่ 🔴";
+      modeLine = "⚙ โหมด : ปกติ";
     }
 
-    lines.push(`• ${mention} — ${statusText}`);
+    blocks.push(
+      `**${index}. ${mention}**\n` +
+      `${statusLine}\n` +
+      `${modeLine}`
+    );
+    index++;
   }
 
-  const desc = `🛰️ สถานะบอทในเซิร์ฟเวอร์ **${guild.name}**\n\n${lines.join(
-    "\n"
-  )}\n\n> ปุ่มด้านล่างใช้สำหรับแอดมินตั้งสถานะบอทว่า “กำลังปรับปรุงอยู่ 🛠️” น้า 💗`;
+  const desc =
+    `🛰️ สถานะบอทในเซิร์ฟเวอร์ **${guild.name}**\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+    blocks.join("\n\n") +
+    `\n\n> ใช้ปุ่มด้านล่างสำหรับแอดมินในการสลับสถานะ “กำลังปรับปรุงอยู่ 🛠️” ของแต่ละบอทนะค้าบ 💗`;
 
   return new EmbedBuilder()
     .setColor(0x00ffc8)
