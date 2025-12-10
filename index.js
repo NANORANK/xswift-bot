@@ -1,4 +1,4 @@
-// index.js - MASTER ULTRA VERSION + RANK PANEL SYSTEM
+// index.js - MASTER ULTRA VERSION + RANK PANEL SYSTEM (ROLE OPTION)
 // (xSwift Hub | By Zemon Źx)
 // ------------------------------------------------------------
 
@@ -42,145 +42,258 @@ const client = new Client({
 // Util Thai Time
 /////////////////////////////////////////////////////////////////
 function getThaiDate() {
-  return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Bangkok" }));
+  return new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Asia/Bangkok" })
+  );
 }
 
 function keyDate(d) {
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  return (
+    d.getFullYear() +
+    "-" +
+    String(d.getMonth() + 1).padStart(2, "0") +
+    "-" +
+    String(d.getDate()).padStart(2, "0")
+  );
 }
 
 /////////////////////////////////////////////////////////////////
 // Names
 /////////////////////////////////////////////////////////////////
-const thaiWeekdays = ["วันอาทิตย์","วันจันทร์","วันอังคาร","วันพุธ","วันพฤหัสบดี","วันศุกร์","วันเสาร์"];
-const thaiMonths = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+const thaiWeekdays = [
+  "วันอาทิตย์",
+  "วันจันทร์",
+  "วันอังคาร",
+  "วันพุธ",
+  "วันพฤหัสบดี",
+  "วันศุกร์",
+  "วันเสาร์"
+];
+
+const thaiMonths = [
+  "มกราคม",
+  "กุมภาพันธ์",
+  "มีนาคม",
+  "เมษายน",
+  "พฤษภาคม",
+  "มิถุนายน",
+  "กรกฎาคม",
+  "สิงหาคม",
+  "กันยายน",
+  "ตุลาคม",
+  "พฤศจิกายน",
+  "ธันวาคม"
+];
 
 /////////////////////////////////////////////////////////////////
 // Colors
 /////////////////////////////////////////////////////////////////
 const colorOfDay = {
-  0:{name:"สีแดง",emoji:"❤️"},1:{name:"สีเหลือง",emoji:"💛"},2:{name:"สีชมพู",emoji:"💗"},
-  3:{name:"สีเขียว",emoji:"💚"},4:{name:"สีส้ม",emoji:"🧡"},5:{name:"สีฟ้า",emoji:"💙"},6:{name:"สีม่วง",emoji:"💜"}
+  0: { name: "สีแดง", emoji: "❤️" },
+  1: { name: "สีเหลือง", emoji: "💛" },
+  2: { name: "สีชมพู", emoji: "💗" },
+  3: { name: "สีเขียว", emoji: "💚" },
+  4: { name: "สีส้ม", emoji: "🧡" },
+  5: { name: "สีฟ้า", emoji: "💙" },
+  6: { name: "สีม่วง", emoji: "💜" }
 };
 
 /////////////////////////////////////////////////////////////////
 // Circle Numbers ➊➋➌
 /////////////////////////////////////////////////////////////////
 const circleNum = [
-  "➊","➋","➌","➍","➎","➏","➐","➑","➒",
-  "➓","➊➊","➊➋","➊➌","➊➍","➊➎","➊➏","➊➐","➊➑","➊➒",
-  "➋➓","➋➊","➋➋","➋➌","➋➍","➋➎","➋➏","➋➐","➋➑","➋➒","➌➓"
+  "➊",
+  "➋",
+  "➌",
+  "➍",
+  "➎",
+  "➏",
+  "➐",
+  "➑",
+  "➒",
+  "➓",
+  "➊➊",
+  "➊➋",
+  "➊➌",
+  "➊➍",
+  "➊➎",
+  "➊➏",
+  "➊➐",
+  "➊➑",
+  "➊➒",
+  "➋➓",
+  "➋➊",
+  "➋➋",
+  "➋➌",
+  "➋➍",
+  "➋➎",
+  "➋➏",
+  "➋➐",
+  "➋➑",
+  "➋➒",
+  "➌➓"
 ];
-const circle = n => n>=1 && n<=31 ? circleNum[n-1] : `${n}`;
+const circle = (n) => (n >= 1 && n <= 31 ? circleNum[n - 1] : String(n));
 
 /////////////////////////////////////////////////////////////////
 // Festival System
 /////////////////////////////////////////////////////////////////
-function isWanPra(d){
-  const start=new Date(d.getFullYear(),d.getMonth(),1);
-  const diff=Math.floor((d-start)/86400000)+1;
-  return [8,15,22,29].includes(diff);
+function isWanPra(d) {
+  const start = new Date(d.getFullYear(), d.getMonth(), 1);
+  const diff = Math.floor((d - start) / 86400000) + 1;
+  return [8, 15, 22, 29].includes(diff);
 }
-function isWanKon(d){
-  const t=new Date(d); t.setDate(d.getDate()+1);
+
+function isWanKon(d) {
+  const t = new Date(d);
+  t.setDate(d.getDate() + 1);
   return isWanPra(t);
 }
-function chineseNewYear(y){
-  return {2024:"2024-02-10",2025:"2025-01-29",2026:"2026-02-17"}[y]||null;
+
+function chineseNewYear(y) {
+  const map = {
+    2024: "2024-02-10",
+    2025: "2025-01-29",
+    2026: "2026-02-17"
+  };
+  return map[y] || null;
 }
-const buddhistDays={
-  2024:{makha:"2024-02-24",visakha:"2024-05-22",asarnha:"2024-07-20",khao:"2024-07-21",ok:"2024-10-17"},
-  2025:{makha:"2025-02-12",visakha:"2025-05-11",asarnha:"2025-07-10",khao:"2025-07-11",ok:"2025-10-06"},
-  2026:{makha:"2026-03-03",visakha:"2026-05-31",asarnha:"2026-07-29",khao:"2026-07-30",ok:"2026-11-05"}
+
+const buddhistDays = {
+  2024: {
+    makha: "2024-02-24",
+    visakha: "2024-05-22",
+    asarnha: "2024-07-20",
+    khao: "2024-07-21",
+    ok: "2024-10-17"
+  },
+  2025: {
+    makha: "2025-02-12",
+    visakha: "2025-05-11",
+    asarnha: "2025-07-10",
+    khao: "2025-07-11",
+    ok: "2025-10-06"
+  },
+  2026: {
+    makha: "2026-03-03",
+    visakha: "2026-05-31",
+    asarnha: "2026-07-29",
+    khao: "2026-07-30",
+    ok: "2026-11-05"
+  }
 };
 
-function getSpecialThaiDays(d){
-  const y=d.getFullYear(), m=d.getMonth()+1, dd=d.getDate();
-  const key=keyDate(d);
-  let list=[];
+function getSpecialThaiDays(d) {
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  const dd = d.getDate();
+  const key = keyDate(d);
 
-  if(isWanKon(d)) list.push("🌕 วันโกน");
-  if(isWanPra(d)) list.push("🪷 วันพระ");
-  if(chineseNewYear(y)===key) list.push("🧧 ตรุษจีน");
-  if(m===11 && dd===15) list.push("🏮 ลอยกระทง");
-  if(m===4 && dd>=13 && dd<=15) list.push("💦 สงกรานต์");
+  let list = [];
 
-  const fixed={
-    "01-01":"🎉 วันขึ้นปีใหม่",
-    "02-14":"💘 วันวาเลนไทน์",
-    "05-01":"🔧 วันแรงงาน",
-    "08-12":"💙 วันแม่แห่งชาติ",
-    "12-05":"💛 วันพ่อแห่งชาติ",
-    "12-10":"📜 วันรัฐธรรมนูญ",
-    "12-25":"🎄 คริสต์มาส",
-    "10-31":"🎃 ฮาโลวีน"
+  if (isWanKon(d)) list.push("🌕 วันโกน");
+  if (isWanPra(d)) list.push("🪷 วันพระ");
+  if (chineseNewYear(y) === key) list.push("🧧 ตรุษจีน");
+  if (m === 11 && dd === 15) list.push("🏮 ลอยกระทง");
+  if (m === 4 && dd >= 13 && dd <= 15) list.push("💦 สงกรานต์");
+
+  const fixed = {
+    "01-01": "🎉 วันขึ้นปีใหม่",
+    "02-14": "💘 วันวาเลนไทน์",
+    "05-01": "🔧 วันแรงงาน",
+    "08-12": "💙 วันแม่แห่งชาติ",
+    "12-05": "💛 วันพ่อแห่งชาติ",
+    "12-10": "📜 วันรัฐธรรมนูญ",
+    "12-25": "🎄 คริสต์มาส",
+    "10-31": "🎃 ฮาโลวีน"
   };
+  const mmdd =
+    String(m).padStart(2, "0") + "-" + String(dd).padStart(2, "0");
+  if (fixed[mmdd]) list.push(fixed[mmdd]);
 
-  const mmdd=`${String(m).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
-  if(fixed[mmdd]) list.push(fixed[mmdd]);
-
-  const bd=buddhistDays[y];
-  if(bd){
-    if(bd.makha===key) list.push("🪔 วันมาฆบูชา");
-    if(bd.visakha===key) list.push("🕊 วันวิสาขบูชา");
-    if(bd.asarnha===key) list.push("✨ วันอาสาฬหบูชา");
-    if(bd.khao===key) list.push("🙏 วันเข้าพรรษา");
-    if(bd.ok===key) list.push("📿 วันออกพรรษา");
+  const bd = buddhistDays[y];
+  if (bd) {
+    if (bd.makha === key) list.push("🪔 วันมาฆบูชา");
+    if (bd.visakha === key) list.push("🕊 วันวิสาขบูชา");
+    if (bd.asarnha === key) list.push("✨ วันอาสาฬหบูชา");
+    if (bd.khao === key) list.push("🙏 วันเข้าพรรษา");
+    if (bd.ok === key) list.push("📿 วันออกพรรษา");
   }
 
-  return list.length?list:["🌸 ไม่มีวันสำคัญ"];
+  return list.length ? list : ["🌸 ไม่มีวันสำคัญ"];
 }
 
 /////////////////////////////////////////////////////////////////
 // Calendar Builder
 /////////////////////////////////////////////////////////////////
-function generateCalendar(date){
-  const y=date.getFullYear(), be=y+543, m=date.getMonth(), d=date.getDate();
-  const nameW=thaiWeekdays[date.getDay()], nameM=thaiMonths[m];
+function generateCalendar(date) {
+  const y = date.getFullYear();
+  const be = y + 543;
+  const m = date.getMonth();
+  const d = date.getDate();
 
-  const first=new Date(y,m,1);
-  const days=new Date(y,m+1,0).getDate();
-  const offset=(first.getDay()+6)%7;
+  const weekdayName = thaiWeekdays[date.getDay()];
+  const monthName = thaiMonths[m];
 
-  let lines=["จ  อ  พ  พฤ ศ  ส  อา"];
-  let row=[],cur=1;
+  const first = new Date(y, m, 1);
+  const days = new Date(y, m + 1, 0).getDate();
+  const offset = (first.getDay() + 6) % 7;
 
-  for(let i=0;i<7;i++){
-    if(i<offset) row.push("   ");
-    else{
-      row.push((cur===d?circle(cur):`${cur}`).padStart(2," ")+" ");
+  let lines = [];
+  lines.push("จ  อ  พ  พฤ ศ  ส  อา");
+
+  let row = [];
+  let cur = 1;
+
+  for (let i = 0; i < 7; i++) {
+    if (i < offset) {
+      row.push("   ");
+    } else {
+      row.push(
+        (cur === d ? circle(cur) : String(cur)).padStart(2, " ") + " "
+      );
       cur++;
     }
   }
   lines.push(row.join(""));
 
-  while(cur<=days){
-    row=[];
-    for(let i=0;i<7;i++){
-      if(cur>days) row.push("   ");
-      else{
-        row.push((cur===d?circle(cur):`${cur}`).padStart(2," ")+" ");
+  while (cur <= days) {
+    row = [];
+    for (let i = 0; i < 7; i++) {
+      if (cur > days) {
+        row.push("   ");
+      } else {
+        row.push(
+          (cur === d ? circle(cur) : String(cur)).padStart(2, " ") + " "
+        );
         cur++;
       }
     }
     lines.push(row.join(""));
   }
 
-  return {weekdayName:nameW, monthName:nameM, be, day:d, text:lines.join("\n")};
+  return {
+    weekdayName,
+    monthName,
+    be,
+    day: d,
+    text: lines.join("\n")
+  };
 }
 
 /////////////////////////////////////////////////////////////////
 // Embed for Calendar
 /////////////////////////////////////////////////////////////////
-const IMAGE_URL = "https://cdn.discordapp.com/attachments/1443746157082706054/1447963237919227934/Unknown.gif";
+const IMAGE_URL =
+  "https://cdn.discordapp.com/attachments/1443746157082706054/1447963237919227934/Unknown.gif";
 
-function buildEmbed(date){
-  const cal=generateCalendar(date);
-  const color=colorOfDay[date.getDay()];
-  const specials=getSpecialThaiDays(date).join(" • ");
+function buildEmbed(date) {
+  const cal = generateCalendar(date);
+  const color = colorOfDay[date.getDay()];
+  const specials = getSpecialThaiDays(date).join(" • ");
 
   const header =
-`✨ ปฏิทินไทยประจำวัน ✨
+    `✨ ปฏิทินไทยประจำวัน ✨
 วันนี้เป็น ${cal.weekdayName} ที่ ${cal.day} ${cal.monthName} พ.ศ. ${cal.be}
 
 🎨 สีประจำวัน : ${color.name} ${color.emoji}
@@ -190,130 +303,204 @@ function buildEmbed(date){
 
   return new EmbedBuilder()
     .setColor(0xff66cc)
-    .setDescription(header + "```txt\n" + cal.text + "\n```\n🪷 วันสำคัญวันนี้ : " + specials)
+    .setDescription(
+      header +
+        "```txt\n" +
+        cal.text +
+        "\n```\n🪷 วันสำคัญวันนี้ : " +
+        specials
+    )
     .setImage(IMAGE_URL)
-    .setFooter({text:"Credit ˚₊·➳❥ By Zemon Źx | xSwift Hub"});
+    .setFooter({
+      text: "Credit ˚₊·➳❥ By Zemon Źx | xSwift Hub"
+    });
 }
 
 /////////////////////////////////////////////////////////////////
 // DAILY SEND
 /////////////////////////////////////////////////////////////////
-let lastSent=null;
+let lastSent = null;
 
-async function sendDaily(reason){
-  try{
-    const ch=await client.channels.fetch(config.channelId);
-    const now=getThaiDate();
-    const today=keyDate(now);
+async function sendDaily(reason) {
+  try {
+    const ch = await client.channels.fetch(config.channelId);
+    const now = getThaiDate();
+    const today = keyDate(now);
 
-    if(lastSent===today) return;
-    lastSent=today;
+    if (lastSent === today) return;
+    lastSent = today;
 
-    await ch.send({content:"@everyone", embeds:[buildEmbed(now)]});
-    console.log("ส่งปฏิทินแล้ว:",today,reason);
-  }catch(e){console.error(e)}
+    await ch.send({ content: "@everyone", embeds: [buildEmbed(now)] });
+    console.log("ส่งปฏิทินแล้ว:", today, reason);
+  } catch (e) {
+    console.error("ส่งปฏิทินผิดพลาด:", e);
+  }
 }
 
 /////////////////////////////////////////////////////////////////
 // VOICE
 /////////////////////////////////////////////////////////////////
-async function connectVoice(){
-  if(!process.env.VOICE_ID) return;
-  try{
-    const ch=await client.channels.fetch(process.env.VOICE_ID);
-    if(!ch.isVoiceBased()) return;
+async function connectVoice() {
+  if (!process.env.VOICE_ID) return;
+  try {
+    const ch = await client.channels.fetch(process.env.VOICE_ID);
+    if (!ch.isVoiceBased()) return;
 
-    const conn=joinVoiceChannel({
-      channelId:ch.id,
-      guildId:ch.guild.id,
-      adapterCreator:ch.guild.voiceAdapterCreator,
-      selfDeaf:true
+    const conn = joinVoiceChannel({
+      channelId: ch.id,
+      guildId: ch.guild.id,
+      adapterCreator: ch.guild.voiceAdapterCreator,
+      selfDeaf: true
     });
 
-    conn.on("error",e=>console.log("VOICE ERROR",e.message));
-    await entersState(conn,VoiceConnectionStatus.Ready,15000);
+    conn.on("error", (e) => console.log("VOICE ERROR", e.message));
+    await entersState(conn, VoiceConnectionStatus.Ready, 15000);
     console.log("เข้าห้องเสียงสำเร็จ 💗");
-  }catch(e){console.log(e.message)}
+  } catch (e) {
+    console.log("เข้าห้องเสียงล้มเหลว:", e.message);
+  }
 }
 
 /////////////////////////////////////////////////////////////////
-// ⚡ NEW SYSTEM — ADMIN RANK PANEL
+// ⚡ NEW SYSTEM — ADMIN RANK PANEL (ROLE OPTION)
+//  /rankpanel role:@ยศ
 /////////////////////////////////////////////////////////////////
+const PANEL_IMAGE =
+  "https://cdn.discordapp.com/attachments/1445301442092072980/1448043469015613470/IMG_4817.gif";
+const WELCOME_IMAGE =
+  "https://cdn.discordapp.com/attachments/1445301442092072980/1448043511558570258/1be0c476c8a40fbe206e2fbc6c5d213c.jpg";
 
-const PANEL_IMAGE = "https://cdn.discordapp.com/attachments/1445301442092072980/1448043469015613470/IMG_4817.gif";
-const WELCOME_IMAGE = "https://cdn.discordapp.com/attachments/1445301442092072980/1448043511558570258/1be0c476c8a40fbe206e2fbc6c5d213c.jpg";
-
-async function registerCommands(){
-  const commands=[
+async function registerCommands() {
+  const commands = [
     new SlashCommandBuilder()
       .setName("rankpanel")
       .setDescription("สร้างหน้า Panel รับยศ (เฉพาะแอดมิน)")
-  ].map(c=>c.toJSON());
+      .addRoleOption((opt) =>
+        opt
+          .setName("role")
+          .setDescription("ยศที่ต้องการให้เมื่อกดปุ่มรับยศ")
+          .setRequired(true)
+      )
+  ].map((c) => c.toJSON());
 
-  const rest=new REST({version:"10"}).setToken(config.token);
-  await rest.put(Routes.applicationCommands(client.user.id),{body:commands});
+  const rest = new REST({ version: "10" }).setToken(config.token);
+  await rest.put(Routes.applicationCommands(client.user.id), {
+    body: commands
+  });
   console.log("REGISTERED /rankpanel");
 }
 
-client.on("interactionCreate", async (i)=>{
-  if(!i.isChatInputCommand()) return;
+// Slash command handler
+client.on("interactionCreate", async (i) => {
+  if (!i.isChatInputCommand()) return;
 
-  if(i.commandName==="rankpanel"){
-    if(!i.member.permissions.has(PermissionsBitField.Flags.Administrator))
-      return i.reply({content:"❌ ต้องเป็นแอดมินนะค้าบ", ephemeral:true});
+  if (i.commandName === "rankpanel") {
+    if (
+      !i.member.permissions.has(
+        PermissionsBitField.Flags.Administrator
+      )
+    ) {
+      return i.reply({
+        content: "❌ ต้องเป็นแอดมินนะค้าบ",
+        ephemeral: true
+      });
+    }
 
-    const embed=new EmbedBuilder()
+    const role = i.options.getRole("role");
+    if (!role) {
+      return i.reply({
+        content: "❌ ไม่พบยศที่เลือกนะค้าบ",
+        ephemeral: true
+      });
+    }
+
+    const embed = new EmbedBuilder()
       .setColor(0xf772d4)
       .setTitle("🌸 รับยศของคุณได้เลย!")
-      .setDescription("กดปุ่มด้านล่างเพื่อรับยศเข้าสู่ระบบ xSwift Hub นะค้าบ 💗")
+      .setDescription(
+        `กดปุ่มด้านล่างเพื่อรับยศ **${role.name}** เข้าสู่ระบบ xSwift Hub นะค้าบ 💗`
+      )
       .setImage(PANEL_IMAGE)
-      .setFooter({text:"xSwift Hub | By Zemon Źx"});
+      .setFooter({ text: "xSwift Hub | By Zemon Źx" });
 
-    const row=new ActionRowBuilder().addComponents(
+    // encode roleId ใน customId
+    const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId("rank_accept")
+        .setCustomId(`rank_accept_${role.id}`)
         .setStyle(ButtonStyle.Success)
         .setLabel("💗 รับยศเลย!")
     );
 
-    await i.reply({embeds:[embed], components:[row]});
+    await i.reply({ embeds: [embed], components: [row] });
   }
 });
 
-client.on("interactionCreate", async(i)=>{
-  if(!i.isButton()) return;
+// Button handler
+client.on("interactionCreate", async (i) => {
+  if (!i.isButton()) return;
+  if (!i.customId.startsWith("rank_accept_")) return;
 
-  if(i.customId==="rank_accept"){
-    const role=i.guild.roles.cache.get(config.rankRoleId);
-    if(!role) return i.reply({content:"❌ ไม่พบยศ!",ephemeral:true});
+  const roleId = i.customId.replace("rank_accept_", "");
+  const role = i.guild.roles.cache.get(roleId);
+  if (!role) {
+    return i.reply({
+      content: "❌ ยศนี้ถูกลบหรือหาไม่เจอแล้วน้า",
+      ephemeral: true
+    });
+  }
 
+  try {
     await i.member.roles.add(role);
 
-    const log=await client.channels.fetch(config.welcomeLog);
-    if(log){
-      const e=new EmbedBuilder()
-        .setColor(0xff99dd)
-        .setTitle("🎉 ยินดีต้อนรับสมาชิกใหม่!")
-        .setDescription(`สวัสดี ${i.member}! ได้รับยศ **${role.name}** แล้วนะค้าบ 💗\nขอให้สนุกใน xSwift Hub น้าา`)
-        .setImage(WELCOME_IMAGE)
-        .setFooter({text:"xSwift Hub | By Zemon Źx"});
-      log.send({embeds:[e]});
+    // ส่งแจ้งเตือนไปห้อง welcomeLog ตาม config
+    if (config.welcomeLog) {
+      try {
+        const logChannel = await client.channels.fetch(
+          config.welcomeLog
+        );
+        if (logChannel && logChannel.isTextBased()) {
+          const e = new EmbedBuilder()
+            .setColor(0xff99dd)
+            .setTitle("🎉 ยินดีต้อนรับสมาชิกใหม่!")
+            .setDescription(
+              `สวัสดี ${i.member} !\nคุณได้รับยศ **${role.name}** เรียบร้อยแล้วนะค้าบ 💗\nขอให้สนุกไปกับ xSwift Hub น้าา 🌸`
+            )
+            .setImage(WELCOME_IMAGE)
+            .setFooter({ text: "xSwift Hub | By Zemon Źx" });
+
+          await logChannel.send({ embeds: [e] });
+        }
+      } catch (err) {
+        console.log("ส่งข้อความห้อง welcomeLog ไม่สำเร็จ:", err.message);
+      }
     }
 
-    await i.reply({content:"💗 รับยศเรียบร้อยค้าบ!", ephemeral:true});
+    await i.reply({
+      content: "💗 รับยศเรียบร้อยค้าบ!",
+      ephemeral: true
+    });
+  } catch (err) {
+    console.error("ให้ยศไม่สำเร็จ:", err);
+    await i.reply({
+      content: "❌ ให้ยศไม่สำเร็จ ลองใหม่อีกครั้งน้า",
+      ephemeral: true
+    });
   }
 });
 
 /////////////////////////////////////////////////////////////////
 // READY
 /////////////////////////////////////////////////////////////////
-client.once("ready", async()=>{
-  console.log("ล็อกอินเป็น",client.user.tag,"แล้วจ้า 💗");
+client.once("ready", async () => {
+  console.log("ล็อกอินเป็น", client.user.tag, "แล้วจ้า 💗");
+
   await registerCommands();
   await connectVoice();
   await sendDaily("on-ready");
 
-  cron.schedule("0 0 * * *",()=>sendDaily("cron"),{timezone:"Asia/Bangkok"});
+  cron.schedule("0 0 * * *", () => sendDaily("cron"), {
+    timezone: "Asia/Bangkok"
+  });
 });
 
 client.login(config.token);
