@@ -102,14 +102,18 @@ function renderEmojiForDescription(key) {
   if (customMatch) {
     const name = customMatch[1];
     const id = customMatch[2];
-    // try animated? we don't know, default to non-animated form
+    // return mention format for custom emoji
     return `<:${name}:${id}>`;
   }
-  return key; // unicode
+  return key; // unicode emoji
 }
 
+/**
+ * Build embed description lines for a react-role message.
+ * Format per line: " | {emoji}・<@&roleId> ㆍ{role.name}  †"
+ * If none exist, show placeholders as requested.
+ */
 async function buildReactPanelDescription(messageId, guild = null) {
-  // header + list of mappings (emoji・roleName) or placeholders
   const headerLines = [];
   headerLines.push("╭┈ ✧ : กดอิโมจิข้างล่างรับยศ ต่างๆ ˗ˏˋ꒰ ☄️ ꒱");
   const mapForMsg = reactionRoleMap.get(messageId);
@@ -119,14 +123,20 @@ async function buildReactPanelDescription(messageId, guild = null) {
   } else {
     for (const [eKey, roleId] of mapForMsg.entries()) {
       let roleName = roleId;
+      // try to fetch role name and format nicely
       try {
         if (guild) {
-          const role = guild.roles.cache.get(roleId) || (await guild.roles.fetch(roleId).catch(()=>null));
+          const roleCached = guild.roles.cache.get(roleId);
+          const role = roleCached || (await guild.roles.fetch(roleId).catch(() => null));
           if (role) roleName = role.name;
         }
-      } catch (e) {}
+      } catch (e) {
+        // ignore
+      }
       const emojiPresent = renderEmojiForDescription(eKey);
-      headerLines.push(` | ${emojiPresent}・${roleName}`);
+      // show both mention and name to match requested style
+      const roleMention = `<@&${roleId}>`;
+      headerLines.push(` | ${emojiPresent}・${roleMention} ㆍ${roleName}  †`);
     }
   }
   headerLines.push("╰ ┈ ✧ : เลือกได้ 1 ยศ กดอิโมจิเดิม = ถอนยศ");
@@ -136,11 +146,9 @@ async function buildReactPanelDescription(messageId, guild = null) {
 async function updateReactPanelEmbedForMessage(message) {
   try {
     if (!message || !message.id) return;
-    const mapForMsg = reactionRoleMap.get(message.id);
-    if (!mapForMsg) return; // nothing to show (we created panel but not mapping) - still show template
-    // build embed
-    const guild = message.guild;
-    const desc = await buildReactPanelDescription(message.id, guild);
+    // ensure there's at least an entry (could be empty map)
+    if (!reactionRoleMap.has(message.id)) reactionRoleMap.set(message.id, new Map());
+    const desc = await buildReactPanelDescription(message.id, message.guild);
 
     const embed = new EmbedBuilder()
       .setTitle("🌸 รับยศด้วยการกดอิโมจิ")
@@ -1002,34 +1010,23 @@ client.on("interactionCreate", async (i) => {
         return i.reply({ content: "❌ กรุณาเลือกห้องข้อความปกตินะค้าบ", ephemeral: true });
       }
 
-      // initial description (template)
-      const initialDesc = await buildReactPanelDescription("TEMPLATE_EMPTY");
-
-      const embed = new EmbedBuilder()
+      // create initial message with placeholder description
+      const initialEmbed = new EmbedBuilder()
         .setTitle("🌸 รับยศด้วยการกดอิโมจิ")
-        .setDescription(initialDesc.replace("TEMPLATE_EMPTY", "")) // will be overridden by edit later if mapping exists
+        .setDescription("╭┈ ✧ : กดอิโมจิข้างล่างรับยศ ต่างๆ ˗ˏˋ꒰ ☄️ ꒱\n |・\n |・\n╰ ┈ ✧ : เลือกได้ 1 ยศ กดอิโมจิเดิม = ถอนยศ")
         .setColor(0xf772d4)
         .setImage(REACT_PANEL_TOP)
         .setThumbnail(REACT_PANEL_ICON)
         .setFooter({ text: "xSwift Hub | Reaction Roles" });
 
-      const sent = await targetChannel.send({ embeds: [embed] });
+      const sent = await targetChannel.send({ embeds: [initialEmbed] });
 
-      // if there's no entry create empty mapping (so admin can add)
+      // ensure mapping container exists
       if (!reactionRoleMap.has(sent.id)) reactionRoleMap.set(sent.id, new Map());
       saveReactionRoles();
 
-      // update embed to ensure proper formatting (empty placeholders)
-      const desc = await buildReactPanelDescription(sent.id, sent.guild);
-      const embed2 = new EmbedBuilder()
-        .setTitle("🌸 รับยศด้วยการกดอิโมจิ")
-        .setDescription(desc)
-        .setColor(0xf772d4)
-        .setImage(REACT_PANEL_TOP)
-        .setThumbnail(REACT_PANEL_ICON)
-        .setFooter({ text: "xSwift Hub | Reaction Roles" });
-
-      await sent.edit({ embeds: [embed2] }).catch(() => {});
+      // update embed to ensure format (no-op if nothing)
+      await updateReactPanelEmbedForMessage(sent);
 
       return i.reply({ content: `✅ สร้าง Reaction Role Panel ใน ${targetChannel} เรียบร้อยจ้า\nMessage ID: \`${sent.id}\``, ephemeral: true });
     }
@@ -1074,7 +1071,8 @@ client.on("interactionCreate", async (i) => {
         // try to resolve to use .react
         const emojiObj = client.emojis.cache.get(id);
         if (emojiObj) {
-          emojiToReact = emojiObj.identifier; // name:id
+          // identifier returns name:id
+          emojiToReact = emojiObj.identifier;
         } else {
           emojiToReact = `${name}:${id}`;
         }
@@ -1097,16 +1095,7 @@ client.on("interactionCreate", async (i) => {
 
       // update the panel embed description in real-time
       try {
-        const desc = await buildReactPanelDescription(foundMessage.id, foundMessage.guild);
-        const embed = new EmbedBuilder()
-          .setTitle("🌸 รับยศด้วยการกดอิโมจิ")
-          .setDescription(desc)
-          .setColor(0xf772d4)
-          .setImage(REACT_PANEL_TOP)
-          .setThumbnail(REACT_PANEL_ICON)
-          .setFooter({ text: "xSwift Hub | Reaction Roles" });
-
-        await foundMessage.edit({ embeds: [embed] }).catch(() => {});
+        await updateReactPanelEmbedForMessage(foundMessage);
       } catch (e) {
         console.log("Failed to update panel after addreact:", e.message);
       }
@@ -1655,6 +1644,10 @@ client.on("messageReactionAdd", async (reaction, user) => {
     if (!member.roles.cache.has(roleId)) {
       await member.roles.add(roleId, "Reaction role added");
     }
+
+    // Optional: ensure user's reaction state consistent (if you want to remove other reactions)
+    // (We won't force-remove other reaction emojis here to avoid unexpected UX)
+
   } catch (err) {
     console.log("reaction add handler error:", err.message);
   }
