@@ -1,4 +1,4 @@
-// index.js - MASTER ULTRA VERSION + RANK PANEL SYSTEM (ROLE OPTION) + BOT STATUS PANEL
+// index.js - MASTER ULTRA VERSION + RANK PANEL SYSTEM (ROLE OPTION) + BOT STATUS PANEL + TICKETS
 // (xSwift Hub | By Zemon Źx)
 // ------------------------------------------------------------
 
@@ -384,6 +384,14 @@ const STATUS_PANEL_ICON =
   "https://cdn.discordapp.com/attachments/1443746157082706054/1448123939250507887/CFA9E582-8035-4C58-9A79-E1269A5FB025.png";
 
 /////////////////////////////////////////////////////////////////
+// ⚡ TICKET PANEL IMAGES
+/////////////////////////////////////////////////////////////////
+const TICKET_PANEL_BANNER =
+  "https://cdn.discordapp.com/attachments/1443746157082706054/1448377350961106964/Strawberry_Bunny_Banner___Tickets.jpg?ex=693b0a06&is=6939b886&hm=204d399864f92661f904e81f92777de1bc86593ecd514a58086f36a3e854fe24&";
+const TICKET_DIVIDER_IMAGE =
+  "https://cdn.discordapp.com/attachments/1443746157082706054/1448377343004508304/Unknown.gif?ex=693b0a04&is=6939b884&hm=3fcfb00baea9897c604dd69f9a07aeec25ce8b034d99194aa96122a3ebd98bc6&";
+
+/////////////////////////////////////////////////////////////////
 // Slash Commands Register
 /////////////////////////////////////////////////////////////////
 async function registerCommands() {
@@ -406,6 +414,16 @@ async function registerCommands() {
           .setDescription("ห้องที่จะให้บอทส่ง Panel สถานะ")
           .addChannelTypes(ChannelType.GuildText)
           .setRequired(true)
+      ),
+    new SlashCommandBuilder()
+      .setName("ticketpanel")
+      .setDescription("สร้าง Panel Tickets สำหรับติดต่อแอดมิน (เฉพาะแอดมิน)")
+      .addChannelOption((opt) =>
+        opt
+          .setName("channel")
+          .setDescription("ห้องที่จะให้บอทส่ง Panel Tickets")
+          .addChannelTypes(ChannelType.GuildText)
+          .setRequired(true)
       )
   ].map((c) => c.toJSON());
 
@@ -413,7 +431,7 @@ async function registerCommands() {
   await rest.put(Routes.applicationCommands(client.user.id), {
     body: commands
   });
-  console.log("REGISTERED /rankpanel + /botpanel");
+  console.log("REGISTERED /rankpanel + /botpanel + /ticketpanel");
 }
 
 /////////////////////////////////////////////////////////////////
@@ -468,7 +486,7 @@ function updateTimeState(panelData, botId, isOnline) {
   return st;
 }
 
-// ✅ ปรับหน้าตาข้อความใน Panel ตรงนี้อย่างเดียว (ตอนนี้อัปเกรดตามสเปกใหม่แล้ว)
+// ✅ BOT STATUS PANEL EMBED
 function buildBotPanelEmbed(guild, panelData) {
   const blocks = [];
   let index = 1;
@@ -489,7 +507,6 @@ function buildBotPanelEmbed(guild, panelData) {
     const inMaintenance = panelData.maintenance.has(botId);
     const isStopped = panelData.stopped.has(botId);
 
-    // อัปเดตสถานะเวลา
     const state = updateTimeState(panelData, botId, isOnline);
     let onlineMs = 0;
     let offlineMs = 0;
@@ -501,7 +518,6 @@ function buildBotPanelEmbed(guild, panelData) {
       onlineMs = 0;
     }
 
-    // สถานะ + โหมด
     let statusLine;
     let modeLine;
     if (isStopped) {
@@ -523,7 +539,6 @@ function buildBotPanelEmbed(guild, panelData) {
       modeLine = "⚙ โหมด : ปกติ ♻️";
     }
 
-    // กำลังทำอะไรอยู่
     let doingLine;
     const vs = member?.voice;
     if (isOnline && vs?.channel) {
@@ -587,6 +602,77 @@ async function updateBotPanel(guildId) {
   } catch (err) {
     console.log("อัปเดต Bot Panel ล้มเหลว:", err.message);
   }
+}
+
+/////////////////////////////////////////////////////////////////
+// TICKET SYSTEM DATA
+/////////////////////////////////////////////////////////////////
+
+// key: `${guildId}:${userId}` -> channelId
+const ticketByUser = new Map();
+// key: channelId -> { guildId, userId }
+const ticketOwnerByChannel = new Map();
+
+function buildTicketPanelEmbed(guild) {
+  const descLines = [
+    "✧˚₊‧  **ticket rules**  ‧₊˚✧",
+    "",
+    "╰┈➤ 𓏲๋๋࣭ ⊹ ห้ามเปิด Ticket พร้อมกันหลายห้องนะคะ",
+    "╰┈➤ 𓏲๋๋࣭ ⊹ ห้ามเปิดเล่น / ลองบอท / แกล้งเปิดเฉย ๆ",
+    "╰┈➤ 𓏲๋๋࣭ ⊹ ห้ามสแปม @/ping แอดมินรัว ๆ ให้ตอบไว",
+    "╰┈➤ 𓏲๋๋࣭ ⊹ คุยดี ๆ เคารพกัน ไม่ใช้คำหยาบใส่สตาฟ",
+    "",
+    "✧˚₊‧  **ticket usage**  ‧₊˚✧",
+    "",
+    "╰┈➤ เปิดเพื่อติดต่อแอดมิน | แจ้งปัญหา | ขอความช่วยเหลือ",
+    "╰┈➤ ปิด Ticket แล้ว ถ้ามีเรื่องใหม่ให้เปิดห้องใหม่แทนน้า",
+    "",
+    "﹙ กดปุ่มด้านล่างเพื่อเปิดห้องคุยส่วนตัวกับทีมงานได้เลยค่ะ ˖ ࣪𖤐﹚"
+  ];
+
+  return new EmbedBuilder()
+    .setColor(0xffb6dc)
+    .setTitle("🎀 xSwift Hub | Tickets Panel")
+    .setDescription(descLines.join("\n"))
+    .setImage(TICKET_PANEL_BANNER)
+    .setThumbnail(TICKET_DIVIDER_IMAGE)
+    .setFooter({
+      text: `เปิดห้องได้เมื่อมีเรื่องจริง ๆ น้า • ${guild.name}`
+    });
+}
+
+function buildTicketIntroEmbed(user) {
+  const descLines = [
+    "✧˚₊‧  **welcome to your ticket**  ‧₊˚✧",
+    "",
+    `╰┈➤ ผู้เปิด Ticket : ${user}`,
+    "╰┈➤ ทีมงานจะเข้ามาตอบให้เร็วที่สุดเลยนะค้า 💗",
+    "",
+    "you can:",
+    "・อธิบายปัญหาที่เจอ / สิ่งที่ต้องการความช่วยเหลือ",
+    "・แนบรูป / วิดีโอ / ลิ้งก์ที่เกี่ยวข้อง",
+    "",
+    "เมื่อคุยจบแล้ว แอดมินสามารถกดปุ่มด้านล่างเพื่อปิด Ticket ได้เลยค่ะ 🎟️"
+  ];
+
+  return new EmbedBuilder()
+    .setColor(0xffb6dc)
+    .setTitle("🎟️ Ticket เปิดเรียบร้อยแล้ว")
+    .setDescription(descLines.join("\n"));
+}
+
+function findStaffRole(guild) {
+  return guild.roles.cache.find((r) => r.name === "ผู้ดูแล") || null;
+}
+
+function userIsStaffOrAdmin(member) {
+  if (!member) return false;
+  if (member.permissions.has(PermissionsBitField.Flags.Administrator)) return true;
+
+  const modRole = member.guild.roles.cache.find((r) => r.name === "ผู้ดูแล");
+  if (modRole && member.roles.cache.has(modRole.id)) return true;
+
+  return false;
 }
 
 /////////////////////////////////////////////////////////////////
@@ -706,6 +792,41 @@ client.on("interactionCreate", async (i) => {
       });
     }
 
+    // ===== /ticketpanel =====
+    if (i.commandName === "ticketpanel") {
+      if (
+        !i.member.permissions.has(PermissionsBitField.Flags.Administrator)
+      ) {
+        return i.reply({
+          content: "❌ คำสั่งนี้สำหรับแอดมินเท่านั้นน้า",
+          ephemeral: true
+        });
+      }
+
+      const targetChannel = i.options.getChannel("channel");
+      if (!targetChannel || !targetChannel.isTextBased()) {
+        return i.reply({
+          content: "❌ กรุณาเลือกห้องข้อความปกตินะค้าบ",
+          ephemeral: true
+        });
+      }
+
+      const embed = buildTicketPanelEmbed(i.guild);
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId("ticket_open")
+          .setStyle(ButtonStyle.Primary)
+          .setLabel("🎟️ เปิด Ticket ติดต่อทีมงาน")
+      );
+
+      await targetChannel.send({ embeds: [embed], components: [row] });
+
+      return i.reply({
+        content: `✅ สร้าง Tickets Panel ใน ${targetChannel} เรียบร้อยแล้วค้าบ`,
+        ephemeral: true
+      });
+    }
+
     return;
   }
 
@@ -763,7 +884,7 @@ client.on("interactionCreate", async (i) => {
       }
     }
 
-    // ===== ปุ่ม Bot Panel: refresh / manage / inspect / stop =====
+    // ===== Bot Panel Buttons =====
     if (i.customId === `botpanel_refresh_${i.guild.id}`) {
       if (
         !i.member.permissions.has(PermissionsBitField.Flags.Administrator)
@@ -921,6 +1042,144 @@ client.on("interactionCreate", async (i) => {
         components: [row],
         ephemeral: true
       });
+    }
+
+    // ===== Ticket Buttons =====
+    if (i.customId === "ticket_open") {
+      const guild = i.guild;
+      const user = i.user;
+
+      const key = `${guild.id}:${user.id}`;
+      const existingChannelId = ticketByUser.get(key);
+      if (existingChannelId) {
+        const existingChannel = guild.channels.cache.get(existingChannelId);
+        if (existingChannel) {
+          return i.reply({
+            content: `❌ เธอมี Ticket เปิดอยู่แล้วที่ ${existingChannel} น้า ถ้ามีเรื่องใหม่ค่อยให้แอดมินปิดห้องเก่าก่อนนะค้าบ`,
+            ephemeral: true
+          });
+        } else {
+          ticketByUser.delete(key);
+          ticketOwnerByChannel.delete(existingChannelId);
+        }
+      }
+
+      const parent = i.channel.parent ?? null;
+      const staffRole = findStaffRole(guild);
+
+      const overwrites = [
+        {
+          id: guild.id,
+          deny: [PermissionsBitField.Flags.ViewChannel]
+        },
+        {
+          id: user.id,
+          allow: [
+            PermissionsBitField.Flags.ViewChannel,
+            PermissionsBitField.Flags.SendMessages,
+            PermissionsBitField.Flags.ReadMessageHistory,
+            PermissionsBitField.Flags.AttachFiles
+          ]
+        },
+        {
+          id: client.user.id,
+          allow: [
+            PermissionsBitField.Flags.ViewChannel,
+            PermissionsBitField.Flags.SendMessages,
+            PermissionsBitField.Flags.ReadMessageHistory,
+            PermissionsBitField.Flags.ManageChannels,
+            PermissionsBitField.Flags.ManageMessages
+          ]
+        },
+        {
+          id: guild.ownerId,
+          allow: [
+            PermissionsBitField.Flags.ViewChannel,
+            PermissionsBitField.Flags.SendMessages,
+            PermissionsBitField.Flags.ReadMessageHistory,
+            PermissionsBitField.Flags.ManageChannels
+          ]
+        }
+      ];
+
+      if (staffRole) {
+        overwrites.push({
+          id: staffRole.id,
+          allow: [
+            PermissionsBitField.Flags.ViewChannel,
+            PermissionsBitField.Flags.SendMessages,
+            PermissionsBitField.Flags.ReadMessageHistory,
+            PermissionsBitField.Flags.ManageMessages
+          ]
+        });
+      }
+
+      const channelName =
+        "ticket-" +
+        user.username
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "")
+          .slice(0, 16);
+
+      const ticketChannel = await guild.channels.create({
+        name: channelName || `ticket-${user.id}`,
+        type: ChannelType.GuildText,
+        parent: parent ?? undefined,
+        topic: `Ticket สำหรับ ${user.tag} | UserID: ${user.id}`,
+        permissionOverwrites: overwrites
+      });
+
+      ticketByUser.set(key, ticketChannel.id);
+      ticketOwnerByChannel.set(ticketChannel.id, { guildId: guild.id, userId: user.id });
+
+      const embed = buildTicketIntroEmbed(user);
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId("ticket_close")
+          .setStyle(ButtonStyle.Danger)
+          .setLabel("🔐 ปิด Ticket นี้")
+      );
+
+      await ticketChannel.send({
+        content: `${user} | <@${guild.ownerId}>${staffRole ? ` | ${staffRole}` : ""}`,
+        embeds: [embed],
+        components: [row]
+      });
+
+      return i.reply({
+        content: `🎟️ สร้างห้อง Ticket ให้แล้วน้า -> ${ticketChannel}`,
+        ephemeral: true
+      });
+    }
+
+    if (i.customId === "ticket_close") {
+      const member = i.member;
+      if (!userIsStaffOrAdmin(member)) {
+        return i.reply({
+          content: "❌ ปิด Ticket ไม่ได้จ้า ปุ่มนี้ให้แอดมิน / ผู้ดูแล ปิดให้เท่านั้นน้า 💗",
+          ephemeral: true
+        });
+      }
+
+      const channel = i.channel;
+      const ownerInfo = ticketOwnerByChannel.get(channel.id);
+
+      if (ownerInfo) {
+        const key = `${ownerInfo.guildId}:${ownerInfo.userId}`;
+        ticketByUser.delete(key);
+        ticketOwnerByChannel.delete(channel.id);
+      }
+
+      await i.reply({
+        content: "🔐 ปิด Ticket แล้ว ขอบคุณที่ติดต่อทีมงานน้า 💗",
+        ephemeral: false
+      });
+
+      setTimeout(() => {
+        channel.delete().catch(() => {});
+      }, 3000);
+
+      return;
     }
 
     return;
