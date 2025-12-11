@@ -36,7 +36,7 @@ const {
 const cron = require("node-cron");
 const config = require("./bot_config");
 
-// NOTE: changed client creation to include partials so reaction events work with old messages
+// NOTE: include partials so reaction events work with old messages
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -89,6 +89,70 @@ function saveReactionRoles() {
     fs.writeFileSync(REACT_DATA_FILE, JSON.stringify(out, null, 2), "utf8");
   } catch (e) {
     console.error("Failed to save reaction roles:", e);
+  }
+}
+
+/////////////////////////////////////////////////////////////////
+// Helper: Build description for react panel
+/////////////////////////////////////////////////////////////////
+function renderEmojiForDescription(key) {
+  // key format: either unicode (like "🌸") or custom "name:id"
+  if (!key) return key;
+  const customMatch = key.match(/^([a-zA-Z0-9_]+):(\d+)$/);
+  if (customMatch) {
+    const name = customMatch[1];
+    const id = customMatch[2];
+    // try animated? we don't know, default to non-animated form
+    return `<:${name}:${id}>`;
+  }
+  return key; // unicode
+}
+
+async function buildReactPanelDescription(messageId, guild = null) {
+  // header + list of mappings (emoji・roleName) or placeholders
+  const headerLines = [];
+  headerLines.push("╭┈ ✧ : กดอิโมจิข้างล่างรับยศ ต่างๆ ˗ˏˋ꒰ ☄️ ꒱");
+  const mapForMsg = reactionRoleMap.get(messageId);
+  if (!mapForMsg || mapForMsg.size === 0) {
+    headerLines.push(" |・");
+    headerLines.push(" |・");
+  } else {
+    for (const [eKey, roleId] of mapForMsg.entries()) {
+      let roleName = roleId;
+      try {
+        if (guild) {
+          const role = guild.roles.cache.get(roleId) || (await guild.roles.fetch(roleId).catch(()=>null));
+          if (role) roleName = role.name;
+        }
+      } catch (e) {}
+      const emojiPresent = renderEmojiForDescription(eKey);
+      headerLines.push(` | ${emojiPresent}・${roleName}`);
+    }
+  }
+  headerLines.push("╰ ┈ ✧ : เลือกได้ 1 ยศ กดอิโมจิเดิม = ถอนยศ");
+  return headerLines.join("\n");
+}
+
+async function updateReactPanelEmbedForMessage(message) {
+  try {
+    if (!message || !message.id) return;
+    const mapForMsg = reactionRoleMap.get(message.id);
+    if (!mapForMsg) return; // nothing to show (we created panel but not mapping) - still show template
+    // build embed
+    const guild = message.guild;
+    const desc = await buildReactPanelDescription(message.id, guild);
+
+    const embed = new EmbedBuilder()
+      .setTitle("🌸 รับยศด้วยการกดอิโมจิ")
+      .setDescription(desc)
+      .setColor(0xf772d4)
+      .setImage(REACT_PANEL_TOP)
+      .setThumbnail(REACT_PANEL_ICON)
+      .setFooter({ text: "xSwift Hub | Reaction Roles" });
+
+    await message.edit({ embeds: [embed] }).catch(() => {});
+  } catch (e) {
+    console.log("Failed to update react panel embed:", e.message);
   }
 }
 
@@ -938,9 +1002,12 @@ client.on("interactionCreate", async (i) => {
         return i.reply({ content: "❌ กรุณาเลือกห้องข้อความปกตินะค้าบ", ephemeral: true });
       }
 
+      // initial description (template)
+      const initialDesc = await buildReactPanelDescription("TEMPLATE_EMPTY");
+
       const embed = new EmbedBuilder()
         .setTitle("🌸 รับยศด้วยการกดอิโมจิ")
-        .setDescription("กดอิโมจิด้านล่างเพื่อรับยศที่ต้องการได้เลยค่ะ\n(รับได้คนละ 1 ยศเท่านั้น — กดอีกอันระบบจะถอดยศเก่าให้อัตโนมัติ)")
+        .setDescription(initialDesc.replace("TEMPLATE_EMPTY", "")) // will be overridden by edit later if mapping exists
         .setColor(0xf772d4)
         .setImage(REACT_PANEL_TOP)
         .setThumbnail(REACT_PANEL_ICON)
@@ -948,9 +1015,21 @@ client.on("interactionCreate", async (i) => {
 
       const sent = await targetChannel.send({ embeds: [embed] });
 
-      // create mapping for this message if not exists
+      // if there's no entry create empty mapping (so admin can add)
       if (!reactionRoleMap.has(sent.id)) reactionRoleMap.set(sent.id, new Map());
       saveReactionRoles();
+
+      // update embed to ensure proper formatting (empty placeholders)
+      const desc = await buildReactPanelDescription(sent.id, sent.guild);
+      const embed2 = new EmbedBuilder()
+        .setTitle("🌸 รับยศด้วยการกดอิโมจิ")
+        .setDescription(desc)
+        .setColor(0xf772d4)
+        .setImage(REACT_PANEL_TOP)
+        .setThumbnail(REACT_PANEL_ICON)
+        .setFooter({ text: "xSwift Hub | Reaction Roles" });
+
+      await sent.edit({ embeds: [embed2] }).catch(() => {});
 
       return i.reply({ content: `✅ สร้าง Reaction Role Panel ใน ${targetChannel} เรียบร้อยจ้า\nMessage ID: \`${sent.id}\``, ephemeral: true });
     }
@@ -982,7 +1061,7 @@ client.on("interactionCreate", async (i) => {
         return i.reply({ content: "❌ ไม่พบข้อความที่ระบุในเซิร์ฟนี้ ลองตรวจสอบ Message ID อีกครั้งนะค้าบ", ephemeral: true });
       }
 
-      // parse emojiInput: could be unicode like "🔰" or custom like "<:name:123456789012345678>"
+      // parse emojiInput: could be unicode like "🔰" or custom like "<:name:123456789012345678>" or "<a:name:id>"
       let emojiRaw = emojiInput.trim();
       let emojiToReact = null;
       let emojiKeyValue = null;
@@ -991,12 +1070,14 @@ client.on("interactionCreate", async (i) => {
       if (customMatch) {
         const name = customMatch[1];
         const id = customMatch[2];
-        emojiToReact = id; // use id for reaction add via client.emojis.resolve
         emojiKeyValue = `${name}:${id}`;
-        // try to construct reaction string for .react
+        // try to resolve to use .react
         const emojiObj = client.emojis.cache.get(id);
-        if (emojiObj) emojiToReact = `${emojiObj.identifier}`;
-        else emojiToReact = `${name}:${id}`;
+        if (emojiObj) {
+          emojiToReact = emojiObj.identifier; // name:id
+        } else {
+          emojiToReact = `${name}:${id}`;
+        }
       } else {
         // assume unicode
         emojiToReact = emojiRaw;
@@ -1013,6 +1094,22 @@ client.on("interactionCreate", async (i) => {
       const mapForMsg = reactionRoleMap.get(foundMessage.id);
       mapForMsg.set(emojiKeyValue, role.id);
       saveReactionRoles();
+
+      // update the panel embed description in real-time
+      try {
+        const desc = await buildReactPanelDescription(foundMessage.id, foundMessage.guild);
+        const embed = new EmbedBuilder()
+          .setTitle("🌸 รับยศด้วยการกดอิโมจิ")
+          .setDescription(desc)
+          .setColor(0xf772d4)
+          .setImage(REACT_PANEL_TOP)
+          .setThumbnail(REACT_PANEL_ICON)
+          .setFooter({ text: "xSwift Hub | Reaction Roles" });
+
+        await foundMessage.edit({ embeds: [embed] }).catch(() => {});
+      } catch (e) {
+        console.log("Failed to update panel after addreact:", e.message);
+      }
 
       return i.reply({ content: `✅ เพิ่มอิโมจิ ${emojiInput} -> ยศ **${role.name}** ให้กับข้อความ \`${foundMessage.id}\` เรียบร้อยจ้า`, ephemeral: true });
     }
@@ -1599,6 +1696,36 @@ client.once("ready", async () => {
 
   // load persisted reaction mappings
   loadReactionRoles();
+
+  // try update existing panel messages with current mapping (if any)
+  for (const [messageId, mapObj] of reactionRoleMap.entries()) {
+    try {
+      // try to find the message in guilds/channels (best effort)
+      let found = null;
+      for (const guild of client.guilds.cache.values()) {
+        try {
+          // search channels
+          for (const ch of guild.channels.cache.values()) {
+            if (!ch.isTextBased()) continue;
+            try {
+              const m = await ch.messages.fetch(messageId).catch(()=>null);
+              if (m) {
+                found = m;
+                break;
+              }
+            } catch (e) {}
+          }
+          if (found) {
+            // update embed for this message
+            await updateReactPanelEmbedForMessage(found);
+            break;
+          }
+        } catch (e) {}
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
 
   await registerCommands();
   await connectVoice();
