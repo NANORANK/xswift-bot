@@ -390,6 +390,8 @@ const TICKET_PANEL_BANNER =
   "https://cdn.discordapp.com/attachments/1443746157082706054/1448377350961106964/Strawberry_Bunny_Banner___Tickets.jpg?ex=693b0a06&is=6939b886&hm=204d399864f92661f904e81f92777de1bc86593ecd514a58086f36a3e854fe24&";
 const TICKET_DIVIDER_IMAGE =
   "https://cdn.discordapp.com/attachments/1443746157082706054/1448377343004508304/Unknown.gif?ex=693b0a04&is=6939b884&hm=3fcfb00baea9897c604dd69f9a07aeec25ce8b034d99194aa96122a3ebd98bc6&";
+const TICKET_SMALL_CORNER =
+  "https://cdn.discordapp.com/attachments/1443746157082706054/1448471958462140549/Unknown.gif?ex=693b6222&is=693a10a2&hm=4017b83df4a29094231e54ee36e431c1f3c97e78f6fd0905328303becc6c739e&";
 
 /////////////////////////////////////////////////////////////////
 // Slash Commands Register
@@ -613,7 +615,14 @@ const ticketByUser = new Map();
 // key: channelId -> { guildId, userId }
 const ticketOwnerByChannel = new Map();
 
-function buildTicketPanelEmbed(guild) {
+// 🔧 สร้าง 2 embeds แบบรูปตัวอย่าง: แบนเนอร์บน + ข้อความล่าง
+function buildTicketPanelEmbeds(guild) {
+  // Embed แบนเนอร์ด้านบน
+  const bannerEmbed = new EmbedBuilder()
+    .setColor(0xffb6dc)
+    .setImage(TICKET_PANEL_BANNER);
+
+  // Embed ข้อความด้านล่าง + รูปเล็กมุมขวา + icon divider
   const descLines = [
     "✧˚₊‧  **ticket rules**  ‧₊˚✧",
     "",
@@ -622,7 +631,9 @@ function buildTicketPanelEmbed(guild) {
     "╰┈➤ 𓏲๋๋࣭ ⊹ ห้ามสแปม @/ping แอดมินรัว ๆ ให้ตอบไว",
     "╰┈➤ 𓏲๋๋࣭ ⊹ คุยดี ๆ เคารพกัน ไม่ใช้คำหยาบใส่สตาฟ",
     "",
+    "╭─────────────────╮",
     "✧˚₊‧  **ticket usage**  ‧₊˚✧",
+    "╰─────────────────╯",
     "",
     "╰┈➤ เปิดเพื่อติดต่อแอดมิน | แจ้งปัญหา | ขอความช่วยเหลือ",
     "╰┈➤ ปิด Ticket แล้ว ถ้ามีเรื่องใหม่ให้เปิดห้องใหม่แทนน้า",
@@ -630,15 +641,17 @@ function buildTicketPanelEmbed(guild) {
     "﹙ กดปุ่มด้านล่างเพื่อเปิดห้องคุยส่วนตัวกับทีมงานได้เลยค่ะ ˖ ࣪𖤐﹚"
   ];
 
-  return new EmbedBuilder()
+  const textEmbed = new EmbedBuilder()
     .setColor(0xffb6dc)
     .setTitle("🎀 xSwift Hub | Tickets Panel")
     .setDescription(descLines.join("\n"))
-    .setImage(TICKET_PANEL_BANNER)
-    .setThumbnail(TICKET_DIVIDER_IMAGE)
+    .setThumbnail(TICKET_SMALL_CORNER)
     .setFooter({
-      text: `เปิดห้องได้เมื่อมีเรื่องจริง ๆ น้า • ${guild.name}`
+      text: `เปิดห้องได้เมื่อมีเรื่องจริง ๆ น้า • ${guild.name}`,
+      iconURL: TICKET_DIVIDER_IMAGE
     });
+
+  return [bannerEmbed, textEmbed];
 }
 
 function buildTicketIntroEmbed(user) {
@@ -811,7 +824,7 @@ client.on("interactionCreate", async (i) => {
         });
       }
 
-      const embed = buildTicketPanelEmbed(i.guild);
+      const embeds = buildTicketPanelEmbeds(i.guild);
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId("ticket_open")
@@ -819,7 +832,7 @@ client.on("interactionCreate", async (i) => {
           .setLabel("🎟️ เปิด Ticket ติดต่อทีมงาน")
       );
 
-      await targetChannel.send({ embeds: [embed], components: [row] });
+      await targetChannel.send({ embeds, components: [row] });
 
       return i.reply({
         content: `✅ สร้าง Tickets Panel ใน ${targetChannel} เรียบร้อยแล้วค้าบ`,
