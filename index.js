@@ -9,6 +9,9 @@ const port = process.env.PORT || 8080;
 app.get("/", (req, res) => res.send("Thai Calendar Bot is Alive 💗"));
 app.listen(port, () => console.log("Web server running on port", port));
 
+const fs = require("fs");
+const path = require("path");
+
 const {
   Client,
   GatewayIntentBits,
@@ -33,15 +36,61 @@ const {
 const cron = require("node-cron");
 const config = require("./bot_config");
 
+// NOTE: changed client creation to include partials so reaction events work with old messages
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildPresences,
-    GatewayIntentBits.GuildVoiceStates
-  ]
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.MessageContent
+  ],
+  partials: ["MESSAGE", "CHANNEL", "REACTION", "USER", "GUILD_MEMBER"]
 });
+
+/////////////////////////////////////////////////////////////////
+// Reaction-role persistence
+/////////////////////////////////////////////////////////////////
+const REACT_DATA_FILE = path.join(__dirname, "reaction_roles.json");
+let reactionRoleMap = new Map(); // Map<messageId, Map<emojiKey, roleId>>
+
+// helper to normalize emoji key (supports unicode & custom)
+function emojiKey(emoji) {
+  if (!emoji) return String(emoji);
+  return emoji.id ? `${emoji.name}:${emoji.id}` : emoji.name;
+}
+
+function loadReactionRoles() {
+  try {
+    if (!fs.existsSync(REACT_DATA_FILE)) return;
+    const raw = fs.readFileSync(REACT_DATA_FILE, "utf8");
+    const obj = JSON.parse(raw);
+    reactionRoleMap = new Map();
+    for (const [messageId, mapObj] of Object.entries(obj)) {
+      const inner = new Map();
+      for (const [k, v] of Object.entries(mapObj)) {
+        inner.set(k, v);
+      }
+      reactionRoleMap.set(messageId, inner);
+    }
+    console.log("Loaded reaction role mappings:", reactionRoleMap.size);
+  } catch (e) {
+    console.error("Failed to load reaction roles:", e);
+  }
+}
+
+function saveReactionRoles() {
+  try {
+    const out = {};
+    for (const [messageId, mapObj] of reactionRoleMap.entries()) {
+      out[messageId] = Object.fromEntries(mapObj);
+    }
+    fs.writeFileSync(REACT_DATA_FILE, JSON.stringify(out, null, 2), "utf8");
+  } catch (e) {
+    console.error("Failed to save reaction roles:", e);
+  }
+}
 
 /////////////////////////////////////////////////////////////////
 // Util Thai Time
@@ -393,6 +442,14 @@ const TICKET_DIVIDER_IMAGE =
 const TICKET_SMALL_CORNER =
   "https://cdn.discordapp.com/attachments/1443746157082706054/1448471958462140549/Unknown.gif?ex=693b6222&is=693a10a2&hm=4017b83df4a29094231e54ee36e431c1f3c97e78f6fd0905328303becc6c739e&";
 
+// Reaction panel images (from user's links)
+const REACT_PANEL_TOP =
+  "https://cdn.discordapp.com/attachments/1443960971394809906/1448605236603392142/Unknown.gif";
+const REACT_PANEL_BOTTOM =
+  "https://cdn.discordapp.com/attachments/1443960971394809906/1448483231992381530/Unknown.gif";
+const REACT_PANEL_ICON =
+  "https://cdn.discordapp.com/attachments/1443746157082706054/1448605563263913984/IMG_5385.gif";
+
 // (ใช้รูปเดียวกับ divider เป็นรูปขั้นกลางแบบเต็มความกว้าง)
 // ถ้าต้องการเปลี่ยนรูปขั้นกลาง ให้แทน URL นี้ด้วยรูปที่ชอบ
 const TICKET_STEP_IMAGE = TICKET_DIVIDER_IMAGE;
@@ -430,6 +487,38 @@ async function registerCommands() {
           .setDescription("ห้องที่จะให้บอทส่ง Panel Tickets")
           .addChannelTypes(ChannelType.GuildText)
           .setRequired(true)
+      ),
+    // Reaction role panel commands:
+    new SlashCommandBuilder()
+      .setName("reactpanel")
+      .setDescription("สร้าง Reaction-Role Panel (เฉพาะแอดมิน)")
+      .addChannelOption((opt) =>
+        opt
+          .setName("channel")
+          .setDescription("ห้องที่จะให้บอทส่ง Reaction Panel")
+          .addChannelTypes(ChannelType.GuildText)
+          .setRequired(true)
+      ),
+    new SlashCommandBuilder()
+      .setName("addreact")
+      .setDescription("เพิ่มอิโมจิ + ยศเข้าไปในข้อความ Reaction-Role (เฉพาะแอดมิน)")
+      .addStringOption((opt) =>
+        opt
+          .setName("message_id")
+          .setDescription("ไอดีข้อความที่ต้องการเพิ่มอิโมจิ")
+          .setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName("emoji")
+          .setDescription("อิโมจิ (unicode หรือ <a:name:id> / <name:id>)")
+          .setRequired(true)
+      )
+      .addRoleOption((opt) =>
+        opt
+          .setName("role")
+          .setDescription("ยศที่จะให้เมื่อกดอิโมจินี้")
+          .setRequired(true)
       )
   ].map((c) => c.toJSON());
 
@@ -437,7 +526,7 @@ async function registerCommands() {
   await rest.put(Routes.applicationCommands(client.user.id), {
     body: commands
   });
-  console.log("REGISTERED /rankpanel + /botpanel + /ticketpanel");
+  console.log("REGISTERED /rankpanel + /botpanel + /ticketpanel + /reactpanel + /addreact");
 }
 
 /////////////////////////////////////////////////////////////////
@@ -836,6 +925,96 @@ client.on("interactionCreate", async (i) => {
         content: `✅ สร้าง Tickets Panel ใน ${targetChannel} เรียบร้อยแล้วค้าบ`,
         ephemeral: true
       });
+    }
+
+    // ===== /reactpanel =====
+    if (i.commandName === "reactpanel") {
+      if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+        return i.reply({ content: "❌ ต้องเป็นแอดมินนะค้าบ", ephemeral: true });
+      }
+
+      const targetChannel = i.options.getChannel("channel");
+      if (!targetChannel || !targetChannel.isTextBased()) {
+        return i.reply({ content: "❌ กรุณาเลือกห้องข้อความปกตินะค้าบ", ephemeral: true });
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle("🌸 รับยศด้วยการกดอิโมจิ")
+        .setDescription("กดอิโมจิด้านล่างเพื่อรับยศที่ต้องการได้เลยค่ะ\n(รับได้คนละ 1 ยศเท่านั้น — กดอีกอันระบบจะถอดยศเก่าให้อัตโนมัติ)")
+        .setColor(0xf772d4)
+        .setImage(REACT_PANEL_TOP)
+        .setThumbnail(REACT_PANEL_ICON)
+        .setFooter({ text: "xSwift Hub | Reaction Roles" });
+
+      const sent = await targetChannel.send({ embeds: [embed] });
+
+      // create mapping for this message if not exists
+      if (!reactionRoleMap.has(sent.id)) reactionRoleMap.set(sent.id, new Map());
+      saveReactionRoles();
+
+      return i.reply({ content: `✅ สร้าง Reaction Role Panel ใน ${targetChannel} เรียบร้อยจ้า\nMessage ID: \`${sent.id}\``, ephemeral: true });
+    }
+
+    // ===== /addreact =====
+    if (i.commandName === "addreact") {
+      if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+        return i.reply({ content: "❌ ต้องเป็นแอดมินนะค้าบ", ephemeral: true });
+      }
+
+      const messageId = i.options.getString("message_id");
+      const emojiInput = i.options.getString("emoji");
+      const role = i.options.getRole("role");
+
+      // fetch message from current guild channels (search)
+      let foundMessage = null;
+      for (const ch of i.guild.channels.cache.values()) {
+        if (!ch.isTextBased()) continue;
+        try {
+          const m = await ch.messages.fetch(messageId).catch(() => null);
+          if (m) {
+            foundMessage = m;
+            break;
+          }
+        } catch (e) {}
+      }
+
+      if (!foundMessage) {
+        return i.reply({ content: "❌ ไม่พบข้อความที่ระบุในเซิร์ฟนี้ ลองตรวจสอบ Message ID อีกครั้งนะค้าบ", ephemeral: true });
+      }
+
+      // parse emojiInput: could be unicode like "🔰" or custom like "<:name:123456789012345678>"
+      let emojiRaw = emojiInput.trim();
+      let emojiToReact = null;
+      let emojiKeyValue = null;
+
+      const customMatch = emojiRaw.match(/<a?:([a-zA-Z0-9_]+):(\d+)>/);
+      if (customMatch) {
+        const name = customMatch[1];
+        const id = customMatch[2];
+        emojiToReact = id; // use id for reaction add via client.emojis.resolve
+        emojiKeyValue = `${name}:${id}`;
+        // try to construct reaction string for .react
+        const emojiObj = client.emojis.cache.get(id);
+        if (emojiObj) emojiToReact = `${emojiObj.identifier}`;
+        else emojiToReact = `${name}:${id}`;
+      } else {
+        // assume unicode
+        emojiToReact = emojiRaw;
+        emojiKeyValue = emojiRaw;
+      }
+
+      try {
+        await foundMessage.react(emojiToReact);
+      } catch (err) {
+        return i.reply({ content: `❌ ไม่สามารถเพิ่มอิโมจิให้ข้อความได้ (bot อาจไม่มี permission หรือ emoji ไม่ถูกต้อง)\nError: ${err.message}`, ephemeral: true });
+      }
+
+      if (!reactionRoleMap.has(foundMessage.id)) reactionRoleMap.set(foundMessage.id, new Map());
+      const mapForMsg = reactionRoleMap.get(foundMessage.id);
+      mapForMsg.set(emojiKeyValue, role.id);
+      saveReactionRoles();
+
+      return i.reply({ content: `✅ เพิ่มอิโมจิ ${emojiInput} -> ยศ **${role.name}** ให้กับข้อความ \`${foundMessage.id}\` เรียบร้อยจ้า`, ephemeral: true });
     }
 
     return;
@@ -1344,10 +1523,82 @@ client.on("presenceUpdate", async (oldP, newP) => {
 });
 
 /////////////////////////////////////////////////////////////////
+// Reaction handlers
+/////////////////////////////////////////////////////////////////
+client.on("messageReactionAdd", async (reaction, user) => {
+  try {
+    if (user.bot) return;
+    if (reaction.partial) await reaction.fetch();
+    if (reaction.message.partial) await reaction.message.fetch();
+
+    const msgId = reaction.message.id;
+    if (!reactionRoleMap.has(msgId)) return;
+
+    const mapForMsg = reactionRoleMap.get(msgId);
+    const key = emojiKey(reaction.emoji);
+    if (!mapForMsg.has(key)) return;
+
+    const roleId = mapForMsg.get(key);
+    const guild = reaction.message.guild;
+    if (!guild) return;
+
+    const member = await guild.members.fetch(user.id).catch(() => null);
+    if (!member) return;
+
+    // Enforce single-role-per-message:
+    for (const [eKey, rId] of mapForMsg.entries()) {
+      if (rId === roleId) continue;
+      if (member.roles.cache.has(rId)) {
+        try {
+          await member.roles.remove(rId, "Reaction role exclusive (removed for new reaction)");
+        } catch (e) {}
+      }
+    }
+
+    if (!member.roles.cache.has(roleId)) {
+      await member.roles.add(roleId, "Reaction role added");
+    }
+  } catch (err) {
+    console.log("reaction add handler error:", err.message);
+  }
+});
+
+client.on("messageReactionRemove", async (reaction, user) => {
+  try {
+    if (user.bot) return;
+    if (reaction.partial) await reaction.fetch();
+    if (reaction.message.partial) await reaction.message.fetch();
+
+    const msgId = reaction.message.id;
+    if (!reactionRoleMap.has(msgId)) return;
+
+    const mapForMsg = reactionRoleMap.get(msgId);
+    const key = emojiKey(reaction.emoji);
+    if (!mapForMsg.has(key)) return;
+
+    const roleId = mapForMsg.get(key);
+    const guild = reaction.message.guild;
+    if (!guild) return;
+
+    const member = await guild.members.fetch(user.id).catch(() => null);
+    if (!member) return;
+
+    if (member.roles.cache.has(roleId)) {
+      await member.roles.remove(roleId, "Reaction role removed by user");
+    }
+  } catch (err) {
+    console.log("reaction remove handler error:", err.message);
+  }
+});
+
+/////////////////////////////////////////////////////////////////
 // READY
 /////////////////////////////////////////////////////////////////
 client.once("ready", async () => {
   console.log("ล็อกอินเป็น", client.user.tag, "แล้วจ้า 💗");
+
+  // load persisted reaction mappings
+  loadReactionRoles();
 
   await registerCommands();
   await connectVoice();
