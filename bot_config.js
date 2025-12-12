@@ -1,7 +1,7 @@
 // bot_config.js
 module.exports = {
   token: process.env.TOKEN,               // โทเค็นบอท
-  channelId: process.env.CHANNEL_ID,     // ห้องที่บอทส่งปฏิทิน (เดิม)
+  channelId: process.env.CHANNEL_ID,     // ห้องที่บอทส่งปฏิทิน (เดิม, legacy - สามารถเป็น CSV ของ id ได้)
   welcomeLog: process.env.WELCOME_LOG,   // ช่องล็อก/แจ้งเตือน (optional fallback)
   welcomeChannel: process.env.WELCOME_CHANNEL, // ช่องหลักที่จะส่งข้อความต้อนรับ (optional fallback)
   welcomeAssignRoleId: process.env.WELCOME_ASSIGN_ROLE_ID, // role id ที่จะมอบให้อัตโนมัติ (optional)
