@@ -50,13 +50,30 @@ function getNotifyChannel(guildId) {
 // Panel persistence (minimal serializable)
 function setPanelData(guildId, panelData) {
   const g = ensureGuildConfig(guildId);
+
+  // convert Sets/Maps to serializable arrays/objects
+  const maintenanceArr = Array.from(panelData.maintenance || []);
+  const stoppedArr = Array.from(panelData.stopped || []);
+  // timeState -> array of [botId, { lastStatus, lastChangeAt }]
+  let timeStateArr = [];
+  if (panelData.timeState) {
+    if (panelData.timeState instanceof Map) {
+      timeStateArr = Array.from(panelData.timeState.entries()).map(([k, v]) => [k, v]);
+    } else if (Array.isArray(panelData.timeState)) {
+      timeStateArr = panelData.timeState;
+    } else if (typeof panelData.timeState === 'object') {
+      // object keyed by botId
+      timeStateArr = Object.keys(panelData.timeState).map(k => [k, panelData.timeState[k]]);
+    }
+  }
+
   g.panel = {
     channelId: panelData.channelId,
     messageId: panelData.messageId,
-    botIds: panelData.botIds,
-    maintenance: Array.from(panelData.maintenance || []),
-    stopped: Array.from(panelData.stopped || []),
-    timeState: Array.from((panelData.timeState && panelData.timeState.entries()) || []).map(([k,v]) => [k, v])
+    botIds: panelData.botIds || [],
+    maintenance: maintenanceArr,
+    stopped: stoppedArr,
+    timeState: timeStateArr
   };
   save();
 }
@@ -105,6 +122,18 @@ function getWelcomeLogChannel(guildId) {
   return g ? g.welcomeLog : null;
 }
 
+// NEW: info channel (for /setinfo -> notifications after rank-accept button)
+// This is the channel that will receive the "รับยศ" info embed (only)
+function setInfoChannel(guildId, channelId) {
+  const g = ensureGuildConfig(guildId);
+  g.infoChannel = channelId;
+  save();
+}
+function getInfoChannel(guildId) {
+  const g = getGuildConfig(guildId);
+  return g ? g.infoChannel : null;
+}
+
 // voice channel per-guild
 function setVoiceChannel(guildId, channelId) {
   const g = ensureGuildConfig(guildId);
@@ -114,6 +143,17 @@ function setVoiceChannel(guildId, channelId) {
 function getVoiceChannel(guildId) {
   const g = getGuildConfig(guildId);
   return g ? g.voiceChannel : null;
+}
+
+// Generic custom storage helpers (backwards-compatible / flexible)
+function setCustom(guildId, obj) {
+  const g = ensureGuildConfig(guildId);
+  g.custom = Object.assign({}, g.custom || {}, obj || {});
+  save();
+}
+function getCustom(guildId) {
+  const g = getGuildConfig(guildId);
+  return g ? (g.custom || {}) : {};
 }
 
 // utility to load all panels (used on startup)
@@ -128,7 +168,7 @@ function loadAllPanels() {
         botIds: p.botIds || [],
         maintenance: new Set(p.maintenance || []),
         stopped: new Set(p.stopped || []),
-        timeState: new Map((p.timeState || []).map(([k,v]) => [k, v]))
+        timeState: new Map((p.timeState || []).map(([k, v]) => [k, v]))
       };
     }
   }
@@ -147,7 +187,11 @@ module.exports = {
   getWelcomeChannel,
   setWelcomeLogChannel,
   getWelcomeLogChannel,
+  setInfoChannel,
+  getInfoChannel,
   setVoiceChannel,
   getVoiceChannel,
+  setCustom,
+  getCustom,
   loadAllPanels
 };
