@@ -35,6 +35,7 @@ function ensureGuildConfig(guildId) {
   return store[guildId];
 }
 
+// notifyChannel = calendar channel
 function setNotifyChannel(guildId, channelId) {
   const g = ensureGuildConfig(guildId);
   g.notifyChannel = channelId;
@@ -46,16 +47,15 @@ function getNotifyChannel(guildId) {
   return g ? g.notifyChannel : null;
 }
 
+// Panel persistence (minimal serializable)
 function setPanelData(guildId, panelData) {
   const g = ensureGuildConfig(guildId);
-  // store only minimal serializable data
   g.panel = {
     channelId: panelData.channelId,
     messageId: panelData.messageId,
     botIds: panelData.botIds,
     maintenance: Array.from(panelData.maintenance || []),
     stopped: Array.from(panelData.stopped || []),
-    // timeState is not fully serializable as Map with Date numbers - store timestamps
     timeState: Array.from((panelData.timeState && panelData.timeState.entries()) || []).map(([k,v]) => [k, v])
   };
   save();
@@ -65,7 +65,6 @@ function getPanelData(guildId) {
   const g = getGuildConfig(guildId);
   if (!g || !g.panel) return null;
   const p = g.panel;
-  // recreate sets and map
   const panel = {
     channelId: p.channelId,
     messageId: p.messageId,
@@ -84,8 +83,56 @@ function clearPanelData(guildId) {
   save();
 }
 
-function getAllGuildIds() {
-  return Object.keys(store);
+// welcome channel (per-guild)
+function setWelcomeChannel(guildId, channelId) {
+  const g = ensureGuildConfig(guildId);
+  g.welcomeChannel = channelId;
+  save();
+}
+function getWelcomeChannel(guildId) {
+  const g = getGuildConfig(guildId);
+  return g ? g.welcomeChannel : null;
+}
+
+// welcome log channel (per-guild)
+function setWelcomeLogChannel(guildId, channelId) {
+  const g = ensureGuildConfig(guildId);
+  g.welcomeLog = channelId;
+  save();
+}
+function getWelcomeLogChannel(guildId) {
+  const g = getGuildConfig(guildId);
+  return g ? g.welcomeLog : null;
+}
+
+// voice channel per-guild
+function setVoiceChannel(guildId, channelId) {
+  const g = ensureGuildConfig(guildId);
+  g.voiceChannel = channelId || null;
+  save();
+}
+function getVoiceChannel(guildId) {
+  const g = getGuildConfig(guildId);
+  return g ? g.voiceChannel : null;
+}
+
+// utility to load all panels (used on startup)
+function loadAllPanels() {
+  const out = {};
+  for (const gid of Object.keys(store)) {
+    if (store[gid].panel) {
+      const p = store[gid].panel;
+      out[gid] = {
+        channelId: p.channelId,
+        messageId: p.messageId,
+        botIds: p.botIds || [],
+        maintenance: new Set(p.maintenance || []),
+        stopped: new Set(p.stopped || []),
+        timeState: new Map((p.timeState || []).map(([k,v]) => [k, v]))
+      };
+    }
+  }
+  return out;
 }
 
 module.exports = {
@@ -96,5 +143,11 @@ module.exports = {
   setPanelData,
   getPanelData,
   clearPanelData,
-  getAllGuildIds
+  setWelcomeChannel,
+  getWelcomeChannel,
+  setWelcomeLogChannel,
+  getWelcomeLogChannel,
+  setVoiceChannel,
+  getVoiceChannel,
+  loadAllPanels
 };
