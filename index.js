@@ -608,7 +608,7 @@ client.on("interactionCreate", async (i) => {
     return;
   }
 
-  // Buttons (rank_accept + botpanel + ticket)
+  // Buttons (rank_accept + botpanel + ticket + welcome)
   if (i.isButton()) {
     // ===== ปุ่มรับยศ =====
     if (i.customId.startsWith("rank_accept_")) {
@@ -750,6 +750,12 @@ client.on("interactionCreate", async (i) => {
       return;
     }
 
+    // ===== Welcome staff buttons (mute/kick) =====
+    if (i.customId.startsWith("welcome_mute_") || i.customId.startsWith("welcome_kick_")) {
+      // handled lower in other handler - keep here for compatibility
+      // We'll let the separate welcome button handler handle it.
+    }
+
     return;
   }
 
@@ -830,7 +836,7 @@ client.on("presenceUpdate", async (oldP, newP) => {
 // NEW: Welcome Ultra System
 // - Sends rich welcome embed when a member joins
 // - Uses config.welcomeChannel (channel id) OR config.welcomeLog OR guild.systemChannel
-// - Shows account age, suspicious flag (account < 7 days), server stats, join date/time (Asia/Bangkok)
+// - Shows account age, suspicious flag (account < welcomeSuspiciousDays), server stats, join date/time (Asia/Bangkok)
 // - Optionally assigns role if config.welcomeAssignRoleId is set
 /////////////////////////////////////////////////////////////////
 client.on("guildMemberAdd", async (member) => {
@@ -929,7 +935,10 @@ client.on("guildMemberAdd", async (member) => {
       const staffRoleName = config.welcomeNotifyRoleName || "ผู้ดูแล";
       const staffRole = guild.roles.cache.find(r => r.name === staffRoleName);
       if (staffRole && targetChannel) {
-        targetChannel.send({ content: `${staffRole} — ตรวจพบสมาชิกเข้าร่วมที่อายุบัญชียังน้อย โปรดตรวจสอบ: ${member}` }).catch(()=>{});
+        targetChannel.send({ content: `<@&${staffRole.id}> — ตรวจพบสมาชิกเข้าร่วมที่อายุบัญชียังน้อย โปรดตรวจสอบ: ${member}` }).catch(()=>{});
+      } else if (targetChannel && config.welcomeNotifyRoleName && !staffRole) {
+        // fallback: if name provided but not found, send plain text notice
+        targetChannel.send({ content: `@here — ตรวจพบสมาชิกเข้าร่วมที่อายุบัญชียังน้อย โปรดตรวจสอบ: ${member}` }).catch(()=>{});
       }
     }
 
@@ -960,12 +969,16 @@ client.on("interactionCreate", async (i) => {
       if (!targetMember) return i.reply({ content: "❌ ไม่พบสมาชิกเป้าหมาย", ephemeral: true });
 
       if (action === "mute") {
-        // try to timeout member for 10 minutes (discord timeout)
+        // try to timeout member for 10 minutes (discord timeout) - needs moderator permission
         try {
-          await targetMember.disableCommunicationUntil(Date.now() + 10 * 60 * 1000); // requires proper permissions / API support
-          return i.reply({ content: `🔇 ${targetMember} ถูกทำให้เงียบชั่วคราว 10 นาที`, ephemeral: false });
+          if (typeof targetMember.timeout === "function") {
+            await targetMember.timeout(10 * 60 * 1000, "Muted via welcome panel");
+            return i.reply({ content: `🔇 ${targetMember} ถูกทำให้เงียบชั่วคราว 10 นาที`, ephemeral: false });
+          } else {
+            // fallback: no API support
+            return i.reply({ content: `❌ ฟังก์ชัน timeout ไม่รองรับในเวอร์ชันนี้`, ephemeral: true });
+          }
         } catch (e) {
-          // fallback to reply
           return i.reply({ content: `❌ ไม่สามารถ mute ได้: ${e.message}`, ephemeral: true });
         }
       } else if (action === "kick") {
