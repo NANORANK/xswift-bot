@@ -1,4 +1,4 @@
-// index.js - MASTER ULTRA VERSION (Reaction-role system removed, + Welcome Ultra + RankPanel Dropdown)
+// index.js - MASTER ULTRA VERSION (Reaction-role system removed, + Welcome Ultra)
 // (xSwift Hub | By Zemon Źx)
 // ------------------------------------------------------------
 
@@ -312,13 +312,7 @@ async function connectVoice() {
 }
 
 /////////////////////////////////////////////////////////////////
-// IMAGES for RankPanel (user-provided)
-/////////////////////////////////////////////////////////////////
-const RANK_PANEL_BANNER = "https://cdn.discordapp.com/attachments/1443960971394809906/1448605236603392142/Unknown.gif";
-const RANK_PANEL_ICON = "https://cdn.discordapp.com/attachments/1443960971394809906/1448901293203787857/IMG_5403.jpg";
-
-/////////////////////////////////////////////////////////////////
-// ⚡ RANK PANEL / BOT STATUS / TICKETS (unchanged logic kept, plus new rank panel system)
+// ⚡ RANK PANEL / BOT STATUS / TICKETS (unchanged logic kept)
 /////////////////////////////////////////////////////////////////
 const PANEL_IMAGE = "https://cdn.discordapp.com/attachments/1445301442092072980/1448043469015613470/IMG_4817.gif";
 const WELCOME_IMAGE = "https://cdn.discordapp.com/attachments/1445301442092072980/1448043511558570258/1be0c476c8a40fbe206e2fbc6c5d213c.jpg";
@@ -330,41 +324,26 @@ const TICKET_PANEL_BANNER = "https://cdn.discordapp.com/attachments/144374615708
 const TICKET_DIVIDER_IMAGE = "https://cdn.discordapp.com/attachments/1443746157082706054/1448377343004508304/Unknown.gif?ex=693b0a04&is=6939b884&hm=3fcfb00baea9897c604dd69f9a07aeec25ce8b034d99194aa96122a3ebd98bc6&";
 const TICKET_SMALL_CORNER = "https://cdn.discordapp.com/attachments/1443746157082706054/1448471958462140549/Unknown.gif?ex=693b6222&is=693a10a2&hm=4017b83df4a29094231e54ee36e431c1f3c97e78f6fd0905328303becc6c739e&";
 
-const REACT_PANEL_TOP = RANK_PANEL_BANNER;
+const REACT_PANEL_TOP = "https://cdn.discordapp.com/attachments/1443960971394809906/1448605236603392142/Unknown.gif";
 const REACT_PANEL_BOTTOM = "https://cdn.discordapp.com/attachments/1443960971394809906/1448483231992381530/Unknown.gif";
-const REACT_PANEL_ICON = RANK_PANEL_ICON;
+const REACT_PANEL_ICON = "https://cdn.discordapp.com/attachments/1443746157082706054/1448605563263913984/IMG_5385.gif";
 const TICKET_STEP_IMAGE = TICKET_DIVIDER_IMAGE;
 
 /////////////////////////////////////////////////////////////////
-// Rank Panel Storage (in-memory)
-/////////////////////////////////////////////////////////////////
-// rankPanels: map selectId -> { guildId, channelId, messageId, roleIds: [..], labelMap: {roleId: roleName} }
-// pendingSelection: map `${guildId}:${userId}` -> selectedRoleId (string)
-const rankPanels = new Map();
-const pendingSelection = new Map();
-
-/////////////////////////////////////////////////////////////////
 // Slash Commands Register
-// - updated /rankpanel to accept up to 5 roles (role1 required) for the dropdown
+// Note: /reactpanel and /addreact removed
 /////////////////////////////////////////////////////////////////
 async function registerCommands() {
   const commands = [
     new SlashCommandBuilder()
       .setName("rankpanel")
-      .setDescription("สร้างหน้า Panel รับยศ (เฉพาะแอดมิน) — dropdown เลือกยศ + ปุ่ม รับ/ถอน")
-      .addChannelOption((opt) =>
+      .setDescription("สร้างหน้า Panel รับยศ (เฉพาะแอดมิน)")
+      .addRoleOption((opt) =>
         opt
-          .setName("channel")
-          .setDescription("ห้องที่จะให้บอทส่ง Panel (ถ้าไม่ใส่จะส่งที่ห้องนี้)")
-          .addChannelTypes(ChannelType.GuildText)
-          .setRequired(false)
-      )
-      .addRoleOption(opt => opt.setName("role1").setDescription("ยศตัวที่ 1").setRequired(true))
-      .addRoleOption(opt => opt.setName("role2").setDescription("ยศตัวที่ 2").setRequired(false))
-      .addRoleOption(opt => opt.setName("role3").setDescription("ยศตัวที่ 3").setRequired(false))
-      .addRoleOption(opt => opt.setName("role4").setDescription("ยศตัวที่ 4").setRequired(false))
-      .addRoleOption(opt => opt.setName("role5").setDescription("ยศตัวที่ 5").setRequired(false)),
-
+          .setName("role")
+          .setDescription("ยศที่ต้องการให้เมื่อกดปุ่มรับยศ")
+          .setRequired(true)
+      ),
     new SlashCommandBuilder()
       .setName("botpanel")
       .setDescription("สร้าง Panel แสดงสถานะบอทในเซิร์ฟ (เฉพาะแอดมิน)")
@@ -375,7 +354,6 @@ async function registerCommands() {
           .addChannelTypes(ChannelType.GuildText)
           .setRequired(true)
       ),
-
     new SlashCommandBuilder()
       .setName("ticketpanel")
       .setDescription("สร้าง Panel Tickets สำหรับติดต่อแอดมิน (เฉพาะแอดมิน)")
@@ -574,7 +552,7 @@ function userIsStaffOrAdmin(member) {
 
 /////////////////////////////////////////////////////////////////
 // Interaction Handler (Slash + Button + Select)
-// - Added Rank Panel handlers
+// Note: Reaction handlers removed.
 /////////////////////////////////////////////////////////////////
 client.on("interactionCreate", async (i) => {
   // Slash Commands
@@ -584,56 +562,14 @@ client.on("interactionCreate", async (i) => {
       if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
         return i.reply({ content: "❌ ต้องเป็นแอดมินนะค้าบ", ephemeral: true });
       }
-
-      // collect roles from options
-      const roles = [];
-      for (let n = 1; n <= 5; n++) {
-        const r = i.options.getRole("role" + n);
-        if (r) roles.push(r);
-      }
-      if (roles.length === 0) return i.reply({ content: "❌ ต้องใส่อย่างน้อย 1 ยศนะค้าบ (role1)", ephemeral: true });
-
-      const targetChannel = i.options.getChannel("channel") || i.channel;
-      if (!targetChannel || !targetChannel.isTextBased()) {
-        return i.reply({ content: "❌ กรุณาเลือกห้องข้อความปกตินะค้าบ", ephemeral: true });
-      }
-
-      // build select menu options (max 25 allowed by Discord; we only support up to 5 here)
-      const selectId = `rank_select_${i.guild.id}_${Date.now()}`;
-      const options = roles.map(r => ({ label: r.name.slice(0,100), value: r.id, description: `รับยศ: ${r.name}` }));
-      const select = new StringSelectMenuBuilder().setCustomId(selectId).setPlaceholder("เลือกยศที่ต้องการรับ/เปลี่ยน").addOptions(options);
-      const selectRow = new ActionRowBuilder().addComponents(select);
-
-      // action buttons: รับยศ / ถอนยศ
-      const btnRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`rank_accept_${selectId}`).setStyle(ButtonStyle.Success).setLabel("💗 รับยศ"),
-        new ButtonBuilder().setCustomId(`rank_withdraw_${selectId}`).setStyle(ButtonStyle.Danger).setLabel("🗑️ ถอนยศ")
-      );
-
-      // embed panel
-      const embed = new EmbedBuilder()
-        .setTitle("🌸 รับยศ xSwift Hub")
-        .setDescription("เลือกยศจากเมนูด้านล่างแล้วกด **รับยศ** เพื่อรับยศที่เลือก\nถ้าต้องการยกเลิกยศที่มี ให้กด **ถอนยศ** ได้เลยนะค้าบ")
-        .setColor(0xff88cc)
-        .setImage(RANK_PANEL_BANNER)
-        .setThumbnail(RANK_PANEL_ICON)
-        .setFooter({ text: "Panel รับยศ — xSwift Hub | By Zemon Źx" });
-
-      const sent = await targetChannel.send({ embeds: [embed], components: [selectRow, btnRow] });
-
-      // store panel info
-      rankPanels.set(selectId, {
-        guildId: i.guild.id,
-        channelId: targetChannel.id,
-        messageId: sent.id,
-        roleIds: roles.map(r => r.id),
-        labelMap: roles.reduce((acc, r) => (acc[r.id] = r.name, acc), {})
-      });
-
-      return i.reply({ content: `✅ สร้าง Rank Panel ใน ${targetChannel} เรียบร้อยค้าบ`, ephemeral: true });
+      const role = i.options.getRole("role");
+      if (!role) return i.reply({ content: "❌ ไม่พบยศที่เลือกนะค้าบ", ephemeral: true });
+      const embed = new EmbedBuilder().setColor(0xf772d4).setTitle("🌸 รับยศของคุณได้เลย!").setDescription(`กดปุ่มด้านล่างเพื่อรับยศ **${role.name}** เข้าสู่ระบบ xSwift Hub นะค้าบ 💗`).setImage(PANEL_IMAGE).setFooter({ text: "xSwift Hub | By Zemon Źx" });
+      const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`rank_accept_${role.id}`).setStyle(ButtonStyle.Success).setLabel("💗 รับยศเลย!"));
+      return i.reply({ embeds: [embed], components: [row] });
     }
 
-    // ===== /botpanel ===== (unchanged)
+    // ===== /botpanel =====
     if (i.commandName === "botpanel") {
       if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) return i.reply({ content: "❌ ต้องเป็นแอดมินนะค้าบ", ephemeral: true });
       const targetChannel = i.options.getChannel("channel");
@@ -672,69 +608,35 @@ client.on("interactionCreate", async (i) => {
     return;
   }
 
-  // Buttons (rank_accept, rank_withdraw, and others)
+  // Buttons (rank_accept + botpanel + ticket + welcome)
   if (i.isButton()) {
-    // Handle rank accept / withdraw
-    if (i.customId.startsWith("rank_accept_") || i.customId.startsWith("rank_withdraw_")) {
-      const parts = i.customId.split("_");
-      const action = parts[1]; // accept / withdraw
-      const selectId = parts.slice(2).join("_");
-      const panel = rankPanels.get(selectId);
-      if (!panel) return i.reply({ content: "❌ ไม่พบ Rank Panel นี้แล้ว หรือหมดอายุ", ephemeral: true });
+    // ===== ปุ่มรับยศ =====
+    if (i.customId.startsWith("rank_accept_")) {
+      const roleId = i.customId.replace("rank_accept_", "");
+      const role = i.guild.roles.cache.get(roleId);
+      if (!role) return i.reply({ content: "❌ ยศนี้ถูกลบหรือหาไม่เจอแล้วน้า", ephemeral: true });
 
-      // ensure channel/guild match
-      if (i.guild.id !== panel.guildId) return i.reply({ content: "❌ คำสั่งนี้สำหรับเซิร์ฟที่สร้าง Panel เท่านั้น", ephemeral: true });
-
-      // only proceed with non-bot members
-      const member = i.member;
-      if (!member) return i.reply({ content: "❌ ไม่พบสมาชิก", ephemeral: true });
-
-      if (action === "accept") {
-        // check if user selected something (from pendingSelection)
-        const key = `${i.guild.id}:${i.user.id}`;
-        const selectedRoleId = pendingSelection.get(key);
-        if (!selectedRoleId) {
-          return i.reply({ content: "❗ กรุณาเลือกยศจาก dropdown ก่อน แล้วกดรับยศน้า", ephemeral: true });
-        }
-
-        // ensure selected role belongs to this panel
-        if (!panel.roleIds.includes(selectedRoleId)) {
-          return i.reply({ content: "❌ ยศที่เลือกไม่ถูกต้องสำหรับ Panel นี้", ephemeral: true });
-        }
-
-        try {
-          // remove any other panel roles the user has (so they can switch)
-          const rolesToRemove = panel.roleIds.filter(rid => member.roles.cache.has(rid) && rid !== selectedRoleId);
-          if (rolesToRemove.length) {
-            await member.roles.remove(rolesToRemove, "Switching rank via panel");
+      try {
+        await i.member.roles.add(role);
+        if (config.welcomeLog) {
+          try {
+            const logChannel = await client.channels.fetch(config.welcomeLog).catch(()=>null);
+            if (logChannel && logChannel.isTextBased()) {
+              const e = new EmbedBuilder().setColor(0xff99dd).setTitle("🎉 ยินดีต้อนรับสมาชิกใหม่!").setDescription(`สวัสดี ${i.member} !\nคุณได้รับยศ **${role.name}** เรียบร้อยแล้วนะค้าบ 💗\nขอให้สนุกไปกับ xSwift Hub น้าา 🌸`).setImage(WELCOME_IMAGE).setFooter({ text: "xSwift Hub | By Zemon Źx" });
+              await logChannel.send({ embeds: [e] });
+            }
+          } catch (err) {
+            console.log("ส่งข้อความห้อง welcomeLog ไม่สำเร็จ:", err.message);
           }
-          // add selected role if not already
-          if (!member.roles.cache.has(selectedRoleId)) {
-            await member.roles.add(selectedRoleId, "Assigned via rank panel");
-          }
-          // feedback
-          return i.reply({ content: `✅ ได้รับยศเรียบร้อย: **${panel.labelMap[selectedRoleId] || selectedRoleId}**`, ephemeral: true });
-        } catch (e) {
-          console.error("assign role error:", e);
-          return i.reply({ content: `❌ ให้ยศไม่สำเร็จ: ${e.message}`, ephemeral: true });
         }
-      } else if (action === "withdraw") {
-        try {
-          // remove any roles from this panel that the member has
-          const currentPanelRoles = panel.roleIds.filter(rid => member.roles.cache.has(rid));
-          if (!currentPanelRoles.length) {
-            return i.reply({ content: "ℹ️ คุณยังไม่มียศจาก Panel นี้", ephemeral: true });
-          }
-          await member.roles.remove(currentPanelRoles, "Withdraw via rank panel");
-          return i.reply({ content: `🗑️ ถอนยศเรียบร้อย: ${currentPanelRoles.map(r => panel.labelMap[r] || r).join(", ")}`, ephemeral: true });
-        } catch (e) {
-          console.error("withdraw role error:", e);
-          return i.reply({ content: `❌ ถอนยศไม่สำเร็จ: ${e.message}`, ephemeral: true });
-        }
+
+        return i.reply({ content: "💗 รับยศเรียบร้อยค้าบ!", ephemeral: true });
+      } catch (err) {
+        console.error("ให้ยศไม่สำเร็จ:", err);
+        return i.reply({ content: "❌ ให้ยศไม่สำเร็จ ลองใหม่อีกครั้งน้า", ephemeral: true });
       }
     }
 
-    // other existing button handlers (botpanel, ticket, welcome) - keep original behavior
     // ===== Bot Panel Buttons =====
     if (i.customId === `botpanel_refresh_${i.guild.id}`) {
       if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) return i.reply({ content: "❌ ปุ่มนี้ให้แอดมินกดเท่านั้นนะค้าบ", ephemeral: true });
@@ -848,24 +750,17 @@ client.on("interactionCreate", async (i) => {
       return;
     }
 
+    // ===== Welcome staff buttons (mute/kick) =====
+    if (i.customId.startsWith("welcome_mute_") || i.customId.startsWith("welcome_kick_")) {
+      // handled lower in other handler - keep here for compatibility
+      // We'll let the separate welcome button handler handle it.
+    }
+
     return;
   }
 
-  // Select Menu (including rank panel select)
+  // Select Menu
   if (i.isStringSelectMenu()) {
-    // Rank panel select
-    if (i.customId.startsWith("rank_select_")) {
-      const selectId = i.customId;
-      const panel = rankPanels.get(selectId);
-      if (!panel) return i.update({ content: "❌ ไม่พบ Rank Panel นี้แล้ว", components: [] }).catch(()=>{});
-      // we only allow single selection in our menu
-      const val = i.values[0];
-      // store pending selection per user for this guild
-      pendingSelection.set(`${i.guild.id}:${i.user.id}`, val);
-      return i.reply({ content: `✅ เลือกแล้ว: **${panel.labelMap[val] || val}** — กดปุ่ม 'รับยศ' เพื่อรับ หรือ 'ถอนยศ' เพื่อยกเลิก`, ephemeral: true });
-    }
-
-    // botpanel selects (unchanged)
     if (i.customId === "botpanel_select") {
       if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) return i.reply({ content: "❌ เฉพาะแอดมินเท่านั้นน้า", ephemeral: true });
       const panel = botPanels.get(i.guild.id);
@@ -938,7 +833,11 @@ client.on("presenceUpdate", async (oldP, newP) => {
 });
 
 /////////////////////////////////////////////////////////////////
-// NEW: Welcome Ultra System (kept from previous)
+// NEW: Welcome Ultra System
+// - Sends rich welcome embed when a member joins
+// - Uses config.welcomeChannel (channel id) OR config.welcomeLog OR guild.systemChannel
+// - Shows account age, suspicious flag (account < welcomeSuspiciousDays), server stats, join date/time (Asia/Bangkok)
+// - Optionally assigns role if config.welcomeAssignRoleId is set
 /////////////////////////////////////////////////////////////////
 client.on("guildMemberAdd", async (member) => {
   try {
