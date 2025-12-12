@@ -84,11 +84,17 @@ function clearPanelData(guildId) {
   save();
 }
 
+function getAllGuildIds() {
+  return Object.keys(store);
+}
+
 module.exports = {
   getGuildConfig,
+  ensureGuildConfig,
   setNotifyChannel,
   getNotifyChannel,
   setPanelData,
   getPanelData,
-  clearPanelData
+  clearPanelData,
+  getAllGuildIds
 };
