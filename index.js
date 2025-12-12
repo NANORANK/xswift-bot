@@ -31,8 +31,7 @@ const {
   joinVoiceChannel,
   entersState,
   VoiceConnectionStatus,
-  getVoiceConnection,
-  VoiceConnectionDisconnectReason
+  getVoiceConnection
 } = require("@discordjs/voice");
 
 const cron = require("node-cron");
@@ -57,7 +56,7 @@ const client = new Client({
 /////////////////////////////////////////////////////////////////
 function getThaiDate() {
   return new Date(
-    new Date().toLocaleString("en-US", { timeZone: "Asia/Bangkok" })
+    new Date().toLocaleString("en-US", { timeZone: config.timezone || "Asia/Bangkok" })
   );
 }
 
@@ -271,100 +270,83 @@ function buildEmbed(date) {
 }
 
 /////////////////////////////////////////////////////////////////
-// DAILY SEND (updated: per-guild notify channel support)
+// DAILY SEND (now per-guild)
 /////////////////////////////////////////////////////////////////
-let lastSentByGuild = {}; // prevent double send per guild per day
+let lastSentPerGuild = {}; // remember per-guild last date sent
 
 async function sendDaily(reason) {
   try {
     const now = getThaiDate();
-    const today = keyDate(now);
+    const todayKey = keyDate(now);
 
-    // Priority 1: per-guild configured notify channel
-    const guildIds = guildStore.getAllGuildIds(); // returns array
-    for (const gId of guildIds) {
-      const chId = guildStore.getNotifyChannel(gId);
-      if (!chId) continue;
-      // avoid double send
-      if (lastSentByGuild[gId] === today) continue;
-
+    // iterate all guilds bot is in
+    for (const [guildId, guild] of client.guilds.cache) {
       try {
-        const ch = await client.channels.fetch(chId).catch(()=>null);
+        const targetChannelId = guildStore.getNotifyChannel(guildId) || config.channelId || null;
+        if (!targetChannelId) continue;
+        if (!guild.channels) await guild.fetch(); // ensure
+        const ch = await client.channels.fetch(targetChannelId).catch(()=>null);
         if (!ch || !ch.isTextBased()) continue;
-        await ch.send({ content: "@everyone", embeds: [buildEmbed(now)] });
-        lastSentByGuild[gId] = today;
-        console.log("ส่งปฏิทินให้ guild", gId, "channel", chId);
+
+        const lastSent = lastSentPerGuild[guildId] || null;
+        if (lastSent === todayKey) continue;
+        lastSentPerGuild[guildId] = todayKey;
+
+        await ch.send({ content: "@everyone", embeds: [buildEmbed(now)] }).catch(()=>{});
+        console.log("ส่งปฏิทินให้ guild", guildId, "เหตุผล:", reason);
       } catch (e) {
-        console.log("Failed sending daily to guild", gId, e.message);
+        console.log("sendDaily per-guild error for guild", guildId, e.message);
       }
     }
-
-    // Backwards-compatibility: if config.channelId present, still send there once (legacy)
-    if (config.channelId) {
-      try {
-        // legacy channel might be comma separated list
-        const ids = String(config.channelId).split(',').map(s=>s.trim()).filter(Boolean);
-        for (const chId of ids) {
-          if (lastSentByGuild["legacy_"+chId] === today) continue;
-          const ch = await client.channels.fetch(chId).catch(()=>null);
-          if (!ch || !ch.isTextBased()) continue;
-          await ch.send({ content: "@everyone", embeds: [buildEmbed(now)] });
-          lastSentByGuild["legacy_"+chId] = today;
-          console.log("ส่งปฏิทินไปที่ legacy channel", chId);
-        }
-      } catch(e){
-        console.log("legacy sendDaily error:", e.message);
-      }
-    }
-
   } catch (e) {
-    console.error("sendDaily error:", e);
+    console.error("sendDaily general error:", e);
   }
 }
 
 /////////////////////////////////////////////////////////////////
-// VOICE (STATIC JOIN IF CONFIGURED) + dynamic /join / /leave support
+// VOICE (join per-guild via command)
 /////////////////////////////////////////////////////////////////
-async function connectVoice() {
-  if (!process.env.VOICE_ID) return;
+async function doJoinVoice(guildId, voiceChannelId) {
   try {
-    const ch = await client.channels.fetch(process.env.VOICE_ID).catch(()=>null);
-    if (!ch || !ch.isVoiceBased()) return;
-
+    const ch = await client.channels.fetch(voiceChannelId).catch(()=>null);
+    if (!ch || !ch.isVoiceBased()) throw new Error("ไม่พบห้องเสียงหรือบอทไม่มีสิทธิ์เข้าห้อง");
     const conn = joinVoiceChannel({
       channelId: ch.id,
-      guildId: ch.guild.id,
+      guildId: guildId,
       adapterCreator: ch.guild.voiceAdapterCreator,
       selfDeaf: true
     });
 
     conn.on("error", (e) => console.log("VOICE ERROR", e.message));
     await entersState(conn, VoiceConnectionStatus.Ready, 15000);
-    console.log("เข้าห้องเสียงสำเร็จ 💗");
+    console.log("เข้าห้องเสียงสำเร็จ:", voiceChannelId);
+    return true;
   } catch (e) {
-    console.log("เข้าห้องเสียงล้มเหลว:", e.message);
+    console.log("joinVoice error:", e.message);
+    return false;
   }
 }
 
-// helper to join given voice channel (by id + guild)
-async function joinVoiceForChannel(voiceChannel) {
-  if (!voiceChannel) throw new Error("No voice channel provided");
-  const conn = joinVoiceChannel({
-    channelId: voiceChannel.id,
-    guildId: voiceChannel.guild.id,
-    adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-    selfDeaf: true
-  });
-  conn.on("error", (e) => console.log("VOICE ERROR", e.message));
-  await entersState(conn, VoiceConnectionStatus.Ready, 15000);
-  return conn;
+async function doLeaveVoice(guildId) {
+  try {
+    const conn = getVoiceConnection(guildId);
+    if (conn) {
+      conn.destroy();
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.log("leaveVoice error:", e.message);
+    return false;
+  }
 }
 
 /////////////////////////////////////////////////////////////////
 // ⚡ RANK PANEL / BOT STATUS / TICKETS (unchanged logic kept)
+// (most code retained as original but we ensure /rankpanel also accepts channel param)
 /////////////////////////////////////////////////////////////////
 const PANEL_IMAGE = "https://cdn.discordapp.com/attachments/1445301442092072980/1448043469015613470/IMG_4817.gif";
-const WELCOME_IMAGE = "https://cdn.discordapp.com/attachments/1443960971394809906/1449042578887544996/discord_fake_avatar_decorations_1765546527690.gif?ex=693d7590&is=693c2410&hm=64b575820f8cc70c5a19ba262ab1d4670874a3fa734577c8da7043d74d3812c2&";
+const WELCOME_IMAGE = "https://cdn.discordapp.com/attachments/1445301442092072980/1448043511558570258/1be0c476c8a40fbe206e2fbc6c5d213c.jpg";
 
 const STATUS_PANEL_IMAGE = "https://cdn.discordapp.com/attachments/1443746157082706054/1448123647524081835/Unknown.gif";
 const STATUS_PANEL_ICON = "https://cdn.discordapp.com/attachments/1443746157082706054/1448123939250507887/CFA9E582-8035-4C58-9A79-E1269A5FB025.png";
@@ -379,23 +361,25 @@ const REACT_PANEL_ICON = "https://cdn.discordapp.com/attachments/144374615708270
 const TICKET_STEP_IMAGE = TICKET_DIVIDER_IMAGE;
 
 /////////////////////////////////////////////////////////////////
-// Slash Commands Register (added /setnotify, /join, /leave)
+// Slash Commands Register (updated: new per-guild setters + join)
 /////////////////////////////////////////////////////////////////
 async function registerCommands() {
   try {
     const commands = [
       new SlashCommandBuilder()
         .setName("rankpanel")
-        .setDescription("สร้างหน้า Panel รับยศ (เฉพาะแอดมิน)")
+        .setDescription("สร้างหน้า Panel รับยศ (เฉพาะแอดมินของเซิร์ฟ) และต้องใส่ช่องที่จะโพส")
         .addRoleOption((opt) =>
           opt
             .setName("role")
             .setDescription("ยศที่ต้องการให้เมื่อกดปุ่มรับยศ")
             .setRequired(true)
-        ),
+        )
+        .addChannelOption(opt => opt.setName("channel").setDescription("ห้องที่จะให้ส่งหน้า Panel").addChannelTypes(ChannelType.GuildText).setRequired(true)),
+
       new SlashCommandBuilder()
         .setName("botpanel")
-        .setDescription("สร้าง Panel แสดงสถานะบอทในเซิร์ฟ (เฉพาะแอดมิน)")
+        .setDescription("สร้าง Panel แสดงสถานะบอทในเซิร์ฟ (เฉพาะแอดมิน) — ต้องใส่ช่อง")
         .addChannelOption((opt) =>
           opt
             .setName("channel")
@@ -403,9 +387,10 @@ async function registerCommands() {
             .addChannelTypes(ChannelType.GuildText)
             .setRequired(true)
         ),
+
       new SlashCommandBuilder()
         .setName("ticketpanel")
-        .setDescription("สร้าง Panel Tickets สำหรับติดต่อแอดมิน (เฉพาะแอดมิน)")
+        .setDescription("สร้าง Panel Tickets สำหรับติดต่อแอดมิน (เฉพาะแอดมิน) — ต้องใส่ช่อง")
         .addChannelOption((opt) =>
           opt
             .setName("channel")
@@ -413,41 +398,46 @@ async function registerCommands() {
             .addChannelTypes(ChannelType.GuildText)
             .setRequired(true)
         ),
-      // NEW: setnotify (owner-only)
+
+      // new per-guild setters (owner-only)
       new SlashCommandBuilder()
-        .setName("setnotify")
-        .setDescription("ตั้งห้องแจ้งเตือนปฏิทินรายวันของเซิร์ฟ (เฉพาะเจ้าของเซิร์ฟ)")
-        .addChannelOption((opt) =>
-          opt
-            .setName("channel")
-            .setDescription("เลือกห้องที่จะให้บอทส่งปฏิทินรายวัน")
-            .addChannelTypes(ChannelType.GuildText)
-            .setRequired(true)
-        ),
-      // NEW: join / leave for voice (owner-only)
+        .setName("setcalendar")
+        .setDescription("ตั้งห้องที่จะให้ส่งปฏิทินรายวัน (เฉพาะเจ้าของเซิร์ฟ)")
+        .addChannelOption(opt => opt.setName("channel").setDescription("ห้องข้อความสำหรับปฏิทินรายวัน").addChannelTypes(ChannelType.GuildText).setRequired(true)),
+
+      new SlashCommandBuilder()
+        .setName("setwelcome")
+        .setDescription("ตั้งห้องต้อนรับ (เฉพาะเจ้าของเซิร์ฟ)")
+        .addChannelOption(opt => opt.setName("channel").setDescription("ห้องข้อความสำหรับส่งข้อความต้อนรับ").addChannelTypes(ChannelType.GuildText).setRequired(true)),
+
+      new SlashCommandBuilder()
+        .setName("setwelcomelog")
+        .setDescription("ตั้งห้องสำหรับ log ต้อนรับ/แจ้งเตือน (เฉพาะเจ้าของเซิร์ฟ)")
+        .addChannelOption(opt => opt.setName("channel").setDescription("ห้องข้อความสำหรับ welcome log/แจ้งเตือน").addChannelTypes(ChannelType.GuildText).setRequired(true)),
+
       new SlashCommandBuilder()
         .setName("join")
-        .setDescription("ให้บอทเข้าห้องเสียงของเจ้าของเซิร์ฟ (ถ้าเจ้าของอยู่ในห้องเสียง)"),
+        .setDescription("ให้บอทเข้าห้องเสียง (ต้องใส่ห้องเสียง) — เจ้าของเซิร์ฟเท่านั้น")
+        .addChannelOption(opt => opt.setName("voice_channel").setDescription("ห้องเสียงที่ต้องการให้บอทเข้าร่วม").addChannelTypes(ChannelType.GuildVoice).setRequired(true)),
+
       new SlashCommandBuilder()
         .setName("leave")
-        .setDescription("ให้บอทออกจากห้องเสียงในกิลด์นี้")
+        .setDescription("ให้บอทออกจากห้องเสียง (เจ้าของเซิร์ฟเท่านั้น)")
+        .addChannelOption(opt => opt.setName("voice_channel").setDescription("ห้องเสียง (optional) — ถ้าไม่ใส่ จะออกจากห้องของเซิร์ฟนี้ถ้าเชื่อมอยู่").addChannelTypes(ChannelType.GuildVoice).setRequired(false))
     ].map((c) => c.toJSON());
 
-    const rest = new REST({ version: "10" }).setToken(config.token);
-
+    // Prefer registering globally via application if clientId provided
     if (config.clientId) {
-      // register globally (requires OWNER clientId) — useful for global exposure
+      const rest = new REST({ version: "10" }).setToken(config.token);
       await rest.put(Routes.applicationCommands(config.clientId), { body: commands });
-      console.log("REGISTERED commands globally via config.clientId");
+      console.log("REGISTERED global commands via config.clientId");
     } else {
-      // fallback: register application commands for current app (per-guild propagation)
+      // fallback: set application commands for the bot account (may be slower)
       if (client.application) {
         await client.application.commands.set(commands);
         console.log("REGISTERED commands via client.application.commands");
       } else {
-        // fallback via REST using bot's client id
-        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-        console.log("REGISTERED commands via REST with client.user.id");
+        console.log("[WARN] client.application not ready; can't register commands now.");
       }
     }
   } catch (err) {
@@ -568,11 +558,11 @@ function buildBotPanelEmbed(guild, panelData) {
 }
 
 async function updateBotPanel(guildId) {
-  const panel = botPanels.get(guildId) || guildStore.getPanelData(guildId);
+  const panel = botPanels.get(guildId);
   if (!panel) return;
   try {
     const guild = await client.guilds.fetch(guildId);
-    await guild.members.fetch({ user: panel.botIds }).catch(()=>{});
+    await guild.members.fetch({ user: panel.botIds });
     const channel = await client.channels.fetch(panel.channelId).catch(()=>null);
     if (!channel || !channel.isTextBased()) return;
     const msg = await channel.messages.fetch(panel.messageId).catch(()=>null);
@@ -593,7 +583,7 @@ const ticketOwnerByChannel = new Map();
 function buildTicketPanelEmbeds(guild) {
   const bannerEmbed = new EmbedBuilder().setColor(0xffb6dc).setImage(TICKET_PANEL_BANNER);
   const rulesText = `┍━━━━━»•» 🌺 «•«━┑
-        🌸 𝚃𝚒𝚌𝚔𝚎𝚝𝚜 𝚁𝚞𝚕𝚎𝚣 🌸
+        🌸 𝚃𝚒𝚌𝚔𝚎𝚝𝚜 𝚁𝚞𝚕𝚎𝚜 🌸
 ┕━»•» 🌺 «•«━━━━━┙
 ╭┈ ✧ : ห้ามมีเปิด Tickets หลายห้องนะคะ ˗ˏˋ꒰ 🍒 ꒱
  | 💮・ห้ามเปิดเล่น | บองบอท |
@@ -642,39 +632,48 @@ client.on("interactionCreate", async (i) => {
   try {
     // Slash Commands
     if (i.isChatInputCommand()) {
+
+      // helper: allow owner or global super-admins (config.adminIds)
+      const isOwner = i.guild && i.user && (i.user.id === i.guild.ownerId);
+      const isSuperAdmin = config.adminIds && config.adminIds.includes(i.user.id);
+
       // ===== /rankpanel =====
       if (i.commandName === "rankpanel") {
-        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-          return i.reply({ content: "❌ ต้องเป็นแอดมินนะค้าบ", ephemeral: true });
+        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator) && !isSuperAdmin) {
+          return i.reply({ content: "❌ ต้องเป็นแอดมินเซิร์ฟเท่านั้นน้า", ephemeral: true });
         }
         const role = i.options.getRole("role");
+        const targetChannel = i.options.getChannel("channel");
         if (!role) return i.reply({ content: "❌ ไม่พบยศที่เลือกนะค้าบ", ephemeral: true });
+        if (!targetChannel || !targetChannel.isTextBased()) return i.reply({ content: "❌ กรุณาเลือกห้องข้อความปกตินะค้าบ", ephemeral: true });
+
         const embed = new EmbedBuilder().setColor(0xf772d4).setTitle("🌸 รับยศของคุณได้เลย!").setDescription(`กดปุ่มด้านล่างเพื่อรับยศ **${role.name}** เข้าสู่ระบบ xSwift Hub นะค้าบ 💗`).setImage(PANEL_IMAGE).setFooter({ text: "xSwift Hub | By Zemon Źx" });
         const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`rank_accept_${role.id}`).setStyle(ButtonStyle.Success).setLabel("💗 รับยศเลย!"));
-        return i.reply({ embeds: [embed], components: [row] });
+
+        await targetChannel.send({ embeds: [embed], components: [row] }).catch(()=>{});
+        return i.reply({ content: `✅ สร้าง Rank Panel ใน ${targetChannel} เรียบร้อยค้าบ`, ephemeral: true });
       }
 
       // ===== /botpanel =====
       if (i.commandName === "botpanel") {
-        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) return i.reply({ content: "❌ ต้องเป็นแอดมินนะค้าบ", ephemeral: true });
+        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator) && !isSuperAdmin) return i.reply({ content: "❌ ต้องเป็นแอดมินเซิร์ฟเท่านั้นน้า", ephemeral: true });
         const targetChannel = i.options.getChannel("channel");
         if (!targetChannel || !targetChannel.isTextBased()) return i.reply({ content: "❌ กรุณาเลือกห้องข้อความปกตินะค้าบ", ephemeral: true });
         await i.guild.members.fetch();
         const bots = i.guild.members.cache.filter((m) => m.user.bot);
         if (!bots.size) return i.reply({ content: "❌ เซิร์ฟนี้ยังไม่มีบอทให้เช็กสถานะเลยน้า", ephemeral: true });
 
-        // prepare panelData (preserve timeState if exists)
-        const existing = guildStore.getPanelData(i.guild.id);
-        const panelData = {
-          channelId: targetChannel.id,
-          messageId: null,
-          botIds: bots.map((m) => m.id),
-          maintenance: existing ? existing.maintenance : new Set(),
-          stopped: existing ? existing.stopped : new Set(),
-          timeState: existing ? existing.timeState : new Map()
-        };
+        const panelData = { channelId: targetChannel.id, messageId: null, botIds: bots.map((m) => m.id), maintenance: new Set(), stopped: new Set(), timeState: new Map() };
 
-        // ensure timeState has entries for each bot (but do NOT overwrite existing timestamps)
+        // ensure timeState preserved if existing
+        const existing = guildStore.getPanelData(i.guild.id);
+        if (existing && existing.timeState) {
+          for (const [k, v] of existing.timeState) panelData.timeState.set(k, v);
+          panelData.maintenance = existing.maintenance || panelData.maintenance;
+          panelData.stopped = existing.stopped || panelData.stopped;
+        }
+
+        // initialize any new bot timestamps
         for (const bId of panelData.botIds) {
           if (!panelData.timeState.has(bId)) {
             const mem = i.guild.members.cache.get(bId);
@@ -694,14 +693,14 @@ client.on("interactionCreate", async (i) => {
         const msg = await targetChannel.send({ embeds: [embed], components: [row] });
         panelData.messageId = msg.id;
         botPanels.set(i.guild.id, panelData);
-        guildStore.setPanelData(i.guild.id, panelData);
+        guildStore.setPanelData(i.guild.id, panelData); // persist
 
         return i.reply({ content: `✅ สร้าง Bot Status Panel ใน ${targetChannel} เรียบร้อยค้าบ`, ephemeral: true });
       }
 
       // ===== /ticketpanel =====
       if (i.commandName === "ticketpanel") {
-        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) return i.reply({ content: "❌ คำสั่งนี้สำหรับแอดมินเท่านั้นน้า", ephemeral: true });
+        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator) && !isSuperAdmin) return i.reply({ content: "❌ คำสั่งนี้สำหรับแอดมินเท่านั้นน้า", ephemeral: true });
         const targetChannel = i.options.getChannel("channel");
         if (!targetChannel || !targetChannel.isTextBased()) return i.reply({ content: "❌ กรุณาเลือกห้องข้อความปกตินะค้าบ", ephemeral: true });
         const embeds = buildTicketPanelEmbeds(i.guild);
@@ -710,56 +709,67 @@ client.on("interactionCreate", async (i) => {
         return i.reply({ content: `✅ สร้าง Tickets Panel ใน ${targetChannel} เรียบร้อยแล้วค้าบ`, ephemeral: true });
       }
 
-      // ===== /setnotify ===== (owner-only)
-      if (i.commandName === "setnotify") {
-        // only guild owner allowed
-        if (i.user.id !== i.guild.ownerId) return i.reply({ content: "❌ คำสั่งนี้ให้เจ้าของเซิร์ฟเท่านั้นนะค้าบ", ephemeral: true });
+      // ===== /setcalendar ===== (owner-only)
+      if (i.commandName === "setcalendar") {
+        if (!i.guild) return i.reply({ content: "❌ คำสั่งนี้ใช้ในเซิร์ฟเท่านั้น", ephemeral: true });
+        if (!isOwner && !isSuperAdmin) return i.reply({ content: "❌ คำสั่งนี้เฉพาะเจ้าของเซิร์ฟเท่านั้นน้า", ephemeral: true });
         const channel = i.options.getChannel("channel");
-        if (!channel || !channel.isTextBased()) return i.reply({ content: "❌ กรุณาเลือกห้องข้อความปกติที่บอทสามารถส่งข้อความได้", ephemeral: true });
-        // try sending a permission check ping (ephemeral reply later)
-        try {
-          // store in guild-level store
-          guildStore.setNotifyChannel(i.guild.id, channel.id);
-          return i.reply({ content: `✅ ตั้งค่าห้องแจ้งเตือนปฏิทินรายวันเป็น ${channel} เรียบร้อยแล้วค้าบ`, ephemeral: true });
-        } catch (e) {
-          console.log("setnotify error:", e.message);
-          return i.reply({ content: "❌ เกิดข้อผิดพลาดระหว่างบันทึก ลองใหม่อีกครั้ง", ephemeral: true });
-        }
+        if (!channel || !channel.isTextBased()) return i.reply({ content: "❌ กรุณาเลือกห้องข้อความ", ephemeral: true });
+        guildStore.setNotifyChannel(i.guild.id, channel.id);
+        return i.reply({ content: `✅ ตั้งห้องปฏิทินรายวันเป็น ${channel} เรียบร้อย`, ephemeral: true });
       }
 
-      // ===== /join ===== (owner-only) - join the voice channel where the owner is
+      // ===== /setwelcome ===== (owner-only)
+      if (i.commandName === "setwelcome") {
+        if (!i.guild) return i.reply({ content: "❌ คำสั่งนี้ใช้ในเซิร์ฟเท่านั้น", ephemeral: true });
+        if (!isOwner && !isSuperAdmin) return i.reply({ content: "❌ คำสั่งนี้เฉพาะเจ้าของเซิร์ฟเท่านั้นน้า", ephemeral: true });
+        const channel = i.options.getChannel("channel");
+        if (!channel || !channel.isTextBased()) return i.reply({ content: "❌ กรุณาเลือกห้องข้อความ", ephemeral: true });
+        guildStore.ensureGuildConfig(i.guild.id);
+        guildStore.setWelcomeChannel(i.guild.id, channel.id);
+        return i.reply({ content: `✅ ตั้งห้องต้อนรับเป็น ${channel} เรียบร้อย`, ephemeral: true });
+      }
+
+      // ===== /setwelcomelog ===== (owner-only)
+      if (i.commandName === "setwelcomelog") {
+        if (!i.guild) return i.reply({ content: "❌ คำสั่งนี้ใช้ในเซิร์ฟเท่านั้น", ephemeral: true });
+        if (!isOwner && !isSuperAdmin) return i.reply({ content: "❌ คำสั่งนี้เฉพาะเจ้าของเซิร์ฟเท่านั้นน้า", ephemeral: true });
+        const channel = i.options.getChannel("channel");
+        if (!channel || !channel.isTextBased()) return i.reply({ content: "❌ กรุณาเลือกห้องข้อความ", ephemeral: true });
+        guildStore.setWelcomeLogChannel(i.guild.id, channel.id);
+        return i.reply({ content: `✅ ตั้งห้อง welcome log เป็น ${channel} เรียบร้อย`, ephemeral: true });
+      }
+
+      // ===== /join ===== (owner-only) - join provided voice channel and save voice id for guild
       if (i.commandName === "join") {
-        // only guild owner allowed
-        if (i.user.id !== i.guild.ownerId) return i.reply({ content: "❌ คำสั่งนี้ให้เจ้าของเซิร์ฟเท่านั้นนะค้าบ", ephemeral: true });
-        // fetch member (owner)
-        const ownerMember = await i.guild.members.fetch(i.user.id).catch(()=>null);
-        if (!ownerMember) return i.reply({ content: "❌ หาเจ้าของเซิร์ฟไม่เจอ", ephemeral: true });
-        const voice = ownerMember.voice.channel;
-        if (!voice) return i.reply({ content: "❌ เจ้าของเซิร์ฟต้องอยู่ในห้องเสียงก่อนนะค้าบ", ephemeral: true });
-
-        try {
-          await joinVoiceForChannel(voice);
-          return i.reply({ content: `🎧 เข้าห้องเสียง ${voice.name} เรียบร้อยแล้วค้าบ`, ephemeral: true });
-        } catch (e) {
-          console.log("join command error:", e.message);
-          return i.reply({ content: `❌ ไม่สามารถเข้าห้องเสียงได้: ${e.message}`, ephemeral: true });
+        if (!i.guild) return i.reply({ content: "❌ คำสั่งนี้ใช้ในเซิร์ฟเท่านั้น", ephemeral: true });
+        if (!isOwner && !isSuperAdmin) return i.reply({ content: "❌ คำสั่งนี้เฉพาะเจ้าของเซิร์ฟเท่านั้นน้า", ephemeral: true });
+        const voiceChannel = i.options.getChannel("voice_channel");
+        if (!voiceChannel || !voiceChannel.isVoiceBased()) return i.reply({ content: "❌ กรุณาเลือกห้องเสียง", ephemeral: true });
+        const ok = await doJoinVoice(i.guild.id, voiceChannel.id);
+        if (ok) {
+          guildStore.setVoiceChannel(i.guild.id, voiceChannel.id);
+          return i.reply({ content: `✅ เข้าห้องเสียงเรียบร้อย: ${voiceChannel}`, ephemeral: true });
+        } else {
+          return i.reply({ content: `❌ ล้มเหลวในการเข้าห้องเสียง กรุณาตรวจสอบสิทธิ์`, ephemeral: true });
         }
       }
 
-      // ===== /leave ===== (owner-only) - force leave in that guild
+      // ===== /leave ===== (owner-only)
       if (i.commandName === "leave") {
-        if (i.user.id !== i.guild.ownerId) return i.reply({ content: "❌ คำสั่งนี้ให้เจ้าของเซิร์ฟเท่านั้นนะค้าบ", ephemeral: true });
-        try {
-          const connection = getVoiceConnection(i.guild.id);
-          if (connection) {
-            connection.destroy();
-            return i.reply({ content: "👋 ออกจากห้องเสียงเรียบร้อยแล้วค้าบ", ephemeral: true });
-          } else {
-            return i.reply({ content: "❌ บอทยังไม่ได้อยู่ในห้องเสียงของเซิร์ฟนี้", ephemeral: true });
-          }
-        } catch (e) {
-          console.log("leave error:", e.message);
-          return i.reply({ content: `❌ เกิดข้อผิดพลาด: ${e.message}`, ephemeral: true });
+        if (!i.guild) return i.reply({ content: "❌ คำสั่งนี้ใช้ในเซิร์ฟเท่านั้น", ephemeral: true });
+        if (!isOwner && !isSuperAdmin) return i.reply({ content: "❌ คำสั่งนี้เฉพาะเจ้าของเซิร์ฟเท่านั้นน้า", ephemeral: true });
+        const voiceChannel = i.options.getChannel("voice_channel");
+        // if provided channel, ensure it's that guild's channel
+        if (voiceChannel && (!voiceChannel.isVoiceBased() || voiceChannel.guildId !== i.guild.id)) {
+          return i.reply({ content: "❌ ช่องเสียงไม่ถูกต้อง", ephemeral: true });
+        }
+        const ok = await doLeaveVoice(i.guild.id);
+        if (ok) {
+          guildStore.setVoiceChannel(i.guild.id, null);
+          return i.reply({ content: `✅ ออกจากห้องเสียงเรียบร้อย`, ephemeral: true });
+        } else {
+          return i.reply({ content: `❌ บอทไม่ได้เชื่อมต่อในห้องเสียงของเซิร์ฟนี้`, ephemeral: true });
         }
       }
 
@@ -776,12 +786,13 @@ client.on("interactionCreate", async (i) => {
 
         try {
           await i.member.roles.add(role);
-          if (config.welcomeLog) {
+          const welLogId = guildStore.getWelcomeLogChannel(i.guild.id) || config.welcomeLog;
+          if (welLogId) {
             try {
-              const logChannel = await client.channels.fetch(config.welcomeLog).catch(()=>null);
+              const logChannel = await client.channels.fetch(welLogId).catch(()=>null);
               if (logChannel && logChannel.isTextBased()) {
                 const e = new EmbedBuilder().setColor(0xff99dd).setTitle("🎉 ยินดีต้อนรับสมาชิกใหม่!").setDescription(`สวัสดี ${i.member} !\nคุณได้รับยศ **${role.name}** เรียบร้อยแล้วนะค้าบ 💗\nขอให้สนุกไปกับ xSwift Hub น้าา 🌸`).setImage(WELCOME_IMAGE).setFooter({ text: "xSwift Hub | By Zemon Źx" });
-                await logChannel.send({ embeds: [e] });
+                await logChannel.send({ embeds: [e] }).catch(()=>{});
               }
             } catch (err) {
               console.log("ส่งข้อความห้อง welcomeLog ไม่สำเร็จ:", err.message);
@@ -797,14 +808,14 @@ client.on("interactionCreate", async (i) => {
 
       // ===== Bot Panel Buttons =====
       if (i.customId === `botpanel_refresh_${i.guild.id}`) {
-        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) return i.reply({ content: "❌ ปุ่มนี้ให้แอดมินกดเท่านั้นนะค้าบ", ephemeral: true });
+        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator) && !config.adminIds.includes(i.user.id)) return i.reply({ content: "❌ ปุ่มนี้ให้แอดมินกดเท่านั้นนะค้าบ", ephemeral: true });
         await updateBotPanel(i.guild.id);
         return i.reply({ content: "🔄 อัปเดตสถานะบอททั้งหมดใน Panel แล้วค้าบ", ephemeral: true });
       }
 
       if (i.customId === `botpanel_manage_${i.guild.id}`) {
-        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) return i.reply({ content: "❌ ปุ่มนี้ให้แอดมินกดเท่านั้นนะค้าบ", ephemeral: true });
-        const panel = botPanels.get(i.guild.id) || guildStore.getPanelData(i.guild.id);
+        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator) && !config.adminIds.includes(i.user.id)) return i.reply({ content: "❌ ปุ่มนี้ให้แอดมินกดเท่านั้นนะค้าบ", ephemeral: true });
+        const panel = botPanels.get(i.guild.id);
         if (!panel) return i.reply({ content: "❌ ยังไม่มี Bot Status Panel สำหรับเซิร์ฟนี้นะ ลองใช้คำสั่ง /botpanel ก่อนน้า", ephemeral: true });
 
         const options = panel.botIds.map((id) => {
@@ -820,8 +831,8 @@ client.on("interactionCreate", async (i) => {
       }
 
       if (i.customId === `botpanel_inspect_${i.guild.id}`) {
-        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) return i.reply({ content: "❌ ปุ่มนี้ให้แอดมินเท่านั้นน้า", ephemeral: true });
-        const panel = botPanels.get(i.guild.id) || guildStore.getPanelData(i.guild.id);
+        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator) && !config.adminIds.includes(i.user.id)) return i.reply({ content: "❌ ปุ่มนี้ให้แอดมินเท่านั้นน้า", ephemeral: true });
+        const panel = botPanels.get(i.guild.id);
         if (!panel) return i.reply({ content: "❌ ยังไม่มี Bot Status Panel สำหรับเซิร์ฟนี้นะ ลองใช้คำสั่ง /botpanel ก่อนน้า", ephemeral: true });
 
         const options = panel.botIds.map((id) => {
@@ -836,8 +847,8 @@ client.on("interactionCreate", async (i) => {
       }
 
       if (i.customId === `botpanel_stop_${i.guild.id}`) {
-        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) return i.reply({ content: "❌ ปุ่มนี้ให้แอดมินกดเท่านั้นน้า", ephemeral: true });
-        const panel = botPanels.get(i.guild.id) || guildStore.getPanelData(i.guild.id);
+        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator) && !config.adminIds.includes(i.user.id)) return i.reply({ content: "❌ ปุ่มนี้ให้แอดมินกดเท่านั้นนะค้าบ", ephemeral: true });
+        const panel = botPanels.get(i.guild.id);
         if (!panel) return i.reply({ content: "❌ ยังไม่มี Bot Status Panel สำหรับเซิร์ฟนี้นะ ลองใช้คำสั่ง /botpanel ก่อนน้า", ephemeral: true });
 
         const options = panel.botIds.map((id) => {
@@ -908,27 +919,27 @@ client.on("interactionCreate", async (i) => {
         return;
       }
 
-      // ===== Welcome staff buttons (mute/kick) - handled below in button handler block
+      // ===== Welcome staff buttons handled elsewhere =====
     }
 
-    // Select Menu
+    // Select Menu handlers...
     if (i.isStringSelectMenu()) {
       if (i.customId === "botpanel_select") {
-        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) return i.reply({ content: "❌ เฉพาะแอดมินเท่านั้นน้า", ephemeral: true });
-        const panel = botPanels.get(i.guild.id) || guildStore.getPanelData(i.guild.id);
+        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator) && !config.adminIds.includes(i.user.id)) return i.reply({ content: "❌ เฉพาะแอดมินเท่านั้นน้า", ephemeral: true });
+        const panel = botPanels.get(i.guild.id);
         if (!panel) return i.update({ content: "❌ ไม่มี Bot Status Panel แล้ว (อาจถูกลบไปแล้ว)", components: [] });
         for (const id of i.values) {
           if (panel.maintenance.has(id)) panel.maintenance.delete(id);
           else panel.maintenance.add(id);
         }
-        guildStore.setPanelData(i.guild.id, panel);
+        guildStore.setPanelData(i.guild.id, panel); // persist
         await updateBotPanel(i.guild.id);
         return i.update({ content: "✅ อัปเดตสถานะกำลังปรับปรุงของบอทเรียบร้อยค้าบ", components: [] });
       }
 
       if (i.customId === "botpanel_inspect_select") {
-        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) return i.reply({ content: "❌ เฉพาะแอดมินเท่านั้นน้า", ephemeral: true });
-        const panel = botPanels.get(i.guild.id) || guildStore.getPanelData(i.guild.id);
+        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator) && !config.adminIds.includes(i.user.id)) return i.reply({ content: "❌ เฉพาะแอดมินเท่านั้นน้า", ephemeral: true });
+        const panel = botPanels.get(i.guild.id);
         if (!panel) return i.update({ content: "❌ ไม่มี Bot Status Panel แล้ว (อาจถูกลบไปแล้ว)", components: [] });
 
         const botId = i.values[0];
@@ -959,8 +970,8 @@ client.on("interactionCreate", async (i) => {
       }
 
       if (i.customId === "botpanel_stop_select") {
-        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) return i.reply({ content: "❌ เฉพาะแอดมินเท่านั้นน้า", ephemeral: true });
-        const panel = botPanels.get(i.guild.id) || guildStore.getPanelData(i.guild.id);
+        if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator) && !config.adminIds.includes(i.user.id)) return i.reply({ content: "❌ เฉพาะแอดมินเท่านั้นน้า", ephemeral: true });
+        const panel = botPanels.get(i.guild.id);
         if (!panel) return i.update({ content: "❌ ไม่มี Bot Status Panel แล้ว (อาจถูกลบไปแล้ว)", components: [] });
         if (!panel.stopped) panel.stopped = new Set();
         for (const id of i.values) {
@@ -972,25 +983,28 @@ client.on("interactionCreate", async (i) => {
         return i.update({ content: "✅ อัปเดตโหมด “หยุดบอทชั่วคราว ⚫️” ของบอทที่เลือกเรียบร้อยค้าบ", components: [] });
       }
     }
-  } catch (err) {
-    console.log("interaction handler error:", err.message);
+  } catch (e) {
+    console.log("interactionCreate error:", e.message);
   }
 });
 
 /////////////////////////////////////////////////////////////////
 // Presence Update -> Refresh Bot Panel
 /////////////////////////////////////////////////////////////////
-client.on("presenceUpdate", async (oldPresence, newPresence) => {
+client.on("presenceUpdate", async (oldP, newP) => {
   try {
-    const p = newPresence || oldPresence;
+    const p = newP || oldP;
     if (!p) return;
-    // ensure we only care about bots
     const userIsBot = p?.user?.bot ?? (p?.member?.user?.bot ?? false);
     if (!userIsBot) return;
-
     const guildId = p.guildId || p.guild?.id || (p.member && p.member.guild && p.member.guild.id);
     if (!guildId) return;
-    if (!botPanels.has(guildId) && !guildStore.getPanelData(guildId)) return;
+    if (!botPanels.has(guildId)) {
+      // try to hydrate panel from store if exists
+      const saved = guildStore.getPanelData(guildId);
+      if (saved) botPanels.set(guildId, saved);
+    }
+    if (!botPanels.has(guildId)) return;
     updateBotPanel(guildId).catch(err => console.log("presenceUpdate->updateBotPanel err:", err.message));
   } catch (e) {
     console.log("presenceUpdate handler error:", e.message);
@@ -998,7 +1012,7 @@ client.on("presenceUpdate", async (oldPresence, newPresence) => {
 });
 
 /////////////////////////////////////////////////////////////////
-// NEW: Welcome Ultra System (kept)
+// NEW: Welcome Ultra System (uses per-guild settings if present)
 /////////////////////////////////////////////////////////////////
 client.on("guildMemberAdd", async (member) => {
   try {
@@ -1006,16 +1020,17 @@ client.on("guildMemberAdd", async (member) => {
     if (member.user && member.user.bot) {
       try {
         const guildId = member.guild.id;
-        const existing = guildStore.getPanelData(guildId);
-        if (existing) {
-          if (!existing.botIds.includes(member.id)) {
-            existing.botIds.push(member.id);
-            if (!existing.timeState) existing.timeState = new Map();
-            if (!existing.timeState.has(member.id)) {
+        const panel = botPanels.get(guildId) || guildStore.getPanelData(guildId);
+        if (panel) {
+          if (!panel.botIds.includes(member.id)) {
+            panel.botIds.push(member.id);
+            if (!panel.timeState) panel.timeState = new Map();
+            if (!panel.timeState.has(member.id)) {
               const isOnline = member.presence && member.presence.status && member.presence.status !== "offline";
-              existing.timeState.set(member.id, { lastStatus: isOnline ? "online" : "offline", lastChangeAt: Date.now() });
+              panel.timeState.set(member.id, { lastStatus: isOnline ? "online" : "offline", lastChangeAt: Date.now() });
             }
-            guildStore.setPanelData(guildId, existing);
+            botPanels.set(guildId, panel);
+            guildStore.setPanelData(guildId, panel);
             updateBotPanel(guildId).catch(()=>{});
             console.log(`Added new bot ${member.id} to botPanel for guild ${guildId}`);
           }
@@ -1028,8 +1043,8 @@ client.on("guildMemberAdd", async (member) => {
 
     const guild = member.guild;
 
-    // Determine channel:
-    const channelId = config.welcomeChannel || config.welcomeLog || guild.systemChannel?.id;
+    // Determine channel: per-guild setting -> fallback to config
+    const channelId = guildStore.getWelcomeChannel(guild.id) || guildStore.getWelcomeLogChannel(guild.id) || config.welcomeChannel || config.welcomeLog || guild.systemChannel?.id;
     const ch = channelId ? await client.channels.fetch(channelId).catch(()=>null) : null;
 
     // If no configured channel, try to find a channel named 'welcome' or 'ยินดีต้อนรับ'
@@ -1040,12 +1055,10 @@ client.on("guildMemberAdd", async (member) => {
     // fallback to systemChannel
     if (!targetChannel && guild.systemChannel) targetChannel = guild.systemChannel;
     if (!targetChannel) {
-      // no channel to send, abort quietly
       console.log(`No welcome channel for guild ${guild.id}, skipping welcome embed.`);
       return;
     }
 
-    // Fetch member to ensure properties
     await guild.members.fetch(member.id).catch(()=>null);
 
     const createdAt = member.user.createdTimestamp;
@@ -1054,14 +1067,10 @@ client.on("guildMemberAdd", async (member) => {
 
     // server stats
     const totalMembers = guild.memberCount;
-    // estimate humans/bots (best effort)
     await guild.members.fetch().catch(()=>null);
     const bots = guild.members.cache.filter(m => m.user.bot).size;
     const humans = totalMembers - bots;
 
-    const joinTime = new Date().toLocaleString("en-US", { timeZone: "Asia/Bangkok" });
-
-    // build embed
     const welcomeEmbed = new EmbedBuilder()
       .setTitle("🎀 ยินดีต้อนรับสู่ " + guild.name + "!")
       .setDescription([
@@ -1074,7 +1083,7 @@ client.on("guildMemberAdd", async (member) => {
         "",
         `**📊 ข้อมูลเซิร์ฟ**`,
         `• สมาชิกทั้งหมด: **${totalMembers}** (ผู้ใช้: ${humans} • บอท: ${bots})`,
-        `• เข้าร่วมเมื่อ: <t:${Math.floor(Date.now()/1000)}:f> (เวลาเซิร์ฟ: Asia/Bangkok)`,
+        `• เข้าร่วมเมื่อ: <t:${Math.floor(Date.now()/1000)}:f> (เวลาเซิร์ฟ: ${config.timezone || "Asia/Bangkok"})`,
         "",
         `❗ แอดมิน: หากต้องการยืนยันสมาชิกโดยอัตโนมัติ ให้ตั้งค่าใน \`bot_config.welcomeAssignRoleId\``
       ].join("\n"))
@@ -1083,27 +1092,23 @@ client.on("guildMemberAdd", async (member) => {
       .setColor(suspicious ? 0xffcc00 : 0x66ffcc)
       .setFooter({ text: "xSwift Hub | Welcome System" });
 
-    // Optional action row: quick buttons for staff (only shown in channel)
     const actionRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`welcome_mute_${member.id}`).setLabel("🔇 Mute (Staff)").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`welcome_kick_${member.id}`).setLabel("🦶 Kick (Staff)").setStyle(ButtonStyle.Danger)
     );
 
-    // send embed (ephemeral staff buttons are only useful if staff have permission to click; still sent)
     await targetChannel.send({ embeds: [welcomeEmbed], components: [actionRow] }).catch(()=> {
-      // try sending without buttons if fails due to permissions
       targetChannel.send({ embeds: [welcomeEmbed] }).catch(()=>{});
     });
 
-    // Optionally auto-assign a role (if configured and bot has permission)
     if (config.welcomeAssignRoleId) {
       const role = guild.roles.cache.get(config.welcomeAssignRoleId) || await guild.roles.fetch(config.welcomeAssignRoleId).catch(()=>null);
       if (role) {
         try {
           await member.roles.add(role, "Auto-assign welcome role");
-          // also log to welcomeLog if set
-          if (config.welcomeLog) {
-            const logCh = await client.channels.fetch(config.welcomeLog).catch(()=>null);
+          const logChId = guildStore.getWelcomeLogChannel(guild.id) || config.welcomeLog;
+          if (logChId) {
+            const logCh = await client.channels.fetch(logChId).catch(()=>null);
             if (logCh && logCh.isTextBased()) {
               const logE = new EmbedBuilder().setColor(0x99ffdd).setTitle("Assigned Welcome Role").setDescription(`${member} ได้รับยศอัตโนมัติ: **${role.name}**`).setTimestamp();
               logCh.send({ embeds: [logE] }).catch(()=>{});
@@ -1115,15 +1120,18 @@ client.on("guildMemberAdd", async (member) => {
       }
     }
 
-    // Optional: notify staff ping if account suspicious
     if (suspicious) {
       const staffRoleName = config.welcomeNotifyRoleName || "ผู้ดูแล";
       const staffRole = guild.roles.cache.find(r => r.name === staffRoleName);
+      const logChId = guildStore.getWelcomeLogChannel(guild.id) || config.welcomeLog;
+      const targetLogChannel = logChId ? await client.channels.fetch(logChId).catch(()=>null) : null;
+
       if (staffRole && targetChannel) {
         targetChannel.send({ content: `<@&${staffRole.id}> — ตรวจพบสมาชิกเข้าร่วมที่อายุบัญชียังน้อย โปรดตรวจสอบ: ${member}` }).catch(()=>{});
       } else if (targetChannel && config.welcomeNotifyRoleName && !staffRole) {
-        // fallback: if name provided but not found, send plain text notice
         targetChannel.send({ content: `@here — ตรวจพบสมาชิกเข้าร่วมที่อายุบัญชียังน้อย โปรดตรวจสอบ: ${member}` }).catch(()=>{});
+      } else if (targetLogChannel) {
+        targetLogChannel.send({ content: `⚠️ ตรวจพบสมาชิกเข้าร่วมที่อายุบัญชีน้อย: ${member}` }).catch(()=>{});
       }
     }
 
@@ -1140,7 +1148,6 @@ client.on("interactionCreate", async (i) => {
     if (!i.isButton()) return;
     const id = i.customId;
     if (id.startsWith("welcome_mute_") || id.startsWith("welcome_kick_")) {
-      // only staff/admin allowed
       const member = i.member;
       if (!userIsStaffOrAdmin(member)) {
         return i.reply({ content: "❌ เฉพาะแอดมิน/ผู้ดูแลเท่านั้นที่ใช้ปุ่มนี้ได้", ephemeral: true });
@@ -1154,13 +1161,11 @@ client.on("interactionCreate", async (i) => {
       if (!targetMember) return i.reply({ content: "❌ ไม่พบสมาชิกเป้าหมาย", ephemeral: true });
 
       if (action === "mute") {
-        // try to timeout member for 10 minutes (discord timeout) - needs moderator permission
         try {
           if (typeof targetMember.timeout === "function") {
             await targetMember.timeout(10 * 60 * 1000, "Muted via welcome panel");
             return i.reply({ content: `🔇 ${targetMember} ถูกทำให้เงียบชั่วคราว 10 นาที`, ephemeral: false });
           } else {
-            // fallback: no API support
             return i.reply({ content: `❌ ฟังก์ชัน timeout ไม่รองรับในเวอร์ชันนี้`, ephemeral: true });
           }
         } catch (e) {
@@ -1186,23 +1191,28 @@ client.on("interactionCreate", async (i) => {
 client.once("ready", async () => {
   console.log("ล็อกอินเป็น", client.user.tag, "แล้วจ้า 💗");
 
+  // hydrate saved panels into memory
+  try {
+    const allPanels = guildStore.loadAllPanels();
+    for (const [gid, p] of Object.entries(allPanels || {})) {
+      botPanels.set(gid, p);
+    }
+  } catch (e) {
+    console.log("hydrate panels error:", e.message);
+  }
+
   await registerCommands();
-  await connectVoice();
   await sendDaily("on-ready");
 
-  // ส่งปฏิทินทุกเที่ยงคืน
-  cron.schedule("0 0 * * *", () => sendDaily("cron"), { timezone: "Asia/Bangkok" });
+  // ส่งปฏิทินทุกเที่ยงคืน (per-guild)
+  cron.schedule("0 0 * * *", () => sendDaily("cron"), { timezone: config.timezone || "Asia/Bangkok" });
 
   // อัปเดต Bot Status Panel ทุก ๆ 10 วินาทีแบบ global
   setInterval(() => {
     for (const guildId of botPanels.keys()) updateBotPanel(guildId);
-    // Also update stored panels
-    for (const gId of guildStore.getAllGuildIds()) {
-      if (!botPanels.has(gId) && guildStore.getPanelData(gId)) updateBotPanel(gId);
-    }
   }, 10_000);
 });
 
 client.login(config.token).catch(err => {
-  console.error("Client login error:", err.message);
+  console.error("Client login error:", err?.message || err);
 });
