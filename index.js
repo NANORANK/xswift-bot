@@ -132,7 +132,7 @@ const colorOfDay = {
 };
 
 const circleNum = [
-  "➊","➋","➌","➍","➎","➏","➐","➑","➒","➓","➊➊","➊➋","➊➌","➊➍","➊➎","➊➏","➊➐","➊➑","➊➒","➋➓","➋➊","➋➋","➋➌","➋➍","➋➎","➋➏","➋➐","➋➑","➋➒","➌➓"
+  "➊","➋","➌","➍","➎","➏","➐","➑","➒","➓","➊➊","➊➋","➊➌","➊➍","➊➎","➊➏","➊➐","➊➑","➊➒","➌➓"
 ];
 const circle = (n) => (n >= 1 && n <= 31 ? circleNum[n - 1] : String(n));
 
@@ -334,41 +334,56 @@ const TICKET_STEP_IMAGE = TICKET_DIVIDER_IMAGE;
 // Note: /reactpanel and /addreact removed
 /////////////////////////////////////////////////////////////////
 async function registerCommands() {
-  const commands = [
-    new SlashCommandBuilder()
-      .setName("rankpanel")
-      .setDescription("สร้างหน้า Panel รับยศ (เฉพาะแอดมิน)")
-      .addRoleOption((opt) =>
-        opt
-          .setName("role")
-          .setDescription("ยศที่ต้องการให้เมื่อกดปุ่มรับยศ")
-          .setRequired(true)
-      ),
-    new SlashCommandBuilder()
-      .setName("botpanel")
-      .setDescription("สร้าง Panel แสดงสถานะบอทในเซิร์ฟ (เฉพาะแอดมิน)")
-      .addChannelOption((opt) =>
-        opt
-          .setName("channel")
-          .setDescription("ห้องที่จะให้บอทส่ง Panel สถานะ")
-          .addChannelTypes(ChannelType.GuildText)
-          .setRequired(true)
-      ),
-    new SlashCommandBuilder()
-      .setName("ticketpanel")
-      .setDescription("สร้าง Panel Tickets สำหรับติดต่อแอดมิน (เฉพาะแอดมิน)")
-      .addChannelOption((opt) =>
-        opt
-          .setName("channel")
-          .setDescription("ห้องที่จะให้บอทส่ง Panel Tickets")
-          .addChannelTypes(ChannelType.GuildText)
-          .setRequired(true)
-      )
-  ].map((c) => c.toJSON());
+  try {
+    const commands = [
+      new SlashCommandBuilder()
+        .setName("rankpanel")
+        .setDescription("สร้างหน้า Panel รับยศ (เฉพาะแอดมิน)")
+        .addRoleOption((opt) =>
+          opt
+            .setName("role")
+            .setDescription("ยศที่ต้องการให้เมื่อกดปุ่มรับยศ")
+            .setRequired(true)
+        ),
+      new SlashCommandBuilder()
+        .setName("botpanel")
+        .setDescription("สร้าง Panel แสดงสถานะบอทในเซิร์ฟ (เฉพาะแอดมิน)")
+        .addChannelOption((opt) =>
+          opt
+            .setName("channel")
+            .setDescription("ห้องที่จะให้บอทส่ง Panel สถานะ")
+            .addChannelTypes(ChannelType.GuildText)
+            .setRequired(true)
+        ),
+      new SlashCommandBuilder()
+        .setName("ticketpanel")
+        .setDescription("สร้าง Panel Tickets สำหรับติดต่อแอดมิน (เฉพาะแอดมิน)")
+        .addChannelOption((opt) =>
+          opt
+            .setName("channel")
+            .setDescription("ห้องที่จะให้บอทส่ง Panel Tickets")
+            .addChannelTypes(ChannelType.GuildText)
+            .setRequired(true)
+        )
+    ].map((c) => c.toJSON());
 
-  const rest = new REST({ version: "10" }).setToken(config.token);
-  await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-  console.log("REGISTERED /rankpanel + /botpanel + /ticketpanel");
+    // Prefer registering globally via application if clientId provided
+    if (config.clientId) {
+      const rest = new REST({ version: "10" }).setToken(config.token);
+      await rest.put(Routes.applicationCommands(config.clientId), { body: commands });
+      console.log("REGISTERED global commands via clientId");
+    } else {
+      // fallback: set application commands for the bot account (may be slower)
+      if (client.application) {
+        await client.application.commands.set(commands);
+        console.log("REGISTERED commands via client.application.commands");
+      } else {
+        console.log("[WARN] client.application not ready; can't register commands now.");
+      }
+    }
+  } catch (err) {
+    console.log("Failed to register commands:", err.message);
+  }
 }
 
 /////////////////////////////////////////////////////////////////
@@ -399,14 +414,17 @@ function updateTimeState(panelData, botId, isOnline) {
   let st = panelData.timeState.get(key);
   const current = isOnline ? "online" : "offline";
   if (!st) {
+    // initialize preserving "current" as lastStatus and mark lastChangeAt = now
     st = { lastStatus: current, lastChangeAt: now };
     panelData.timeState.set(key, st);
     return st;
   }
+  // if lastStatus different -> update lastChangeAt to now
   if (st.lastStatus !== current) {
     st.lastStatus = current;
     st.lastChangeAt = now;
   }
+  // else leave lastChangeAt as-is (preserve previous timestamp so durations persist)
   return st;
 }
 
@@ -488,13 +506,17 @@ async function updateBotPanel(guildId) {
   if (!panel) return;
   try {
     const guild = await client.guilds.fetch(guildId);
-    await guild.members.fetch({ user: panel.botIds });
+    // ensure members cache for bots
+    await guild.members.fetch({ user: panel.botIds }).catch(()=>{});
     const channel = await client.channels.fetch(panel.channelId).catch(()=>null);
     if (!channel || !channel.isTextBased()) return;
     const msg = await channel.messages.fetch(panel.messageId).catch(()=>null);
     if (!msg) return;
     const embed = buildBotPanelEmbed(guild, panel);
-    await msg.edit({ embeds: [embed] }).catch(()=>{});
+    await msg.edit({ embeds: [embed] }).catch(err => {
+      // ignore edit errors silently
+      console.log("Failed to edit bot panel message:", err.message);
+    });
   } catch (err) {
     console.log("อัปเดท Bot Panel ล้มเหลว:", err.message);
   }
@@ -578,7 +600,27 @@ client.on("interactionCreate", async (i) => {
       const bots = i.guild.members.cache.filter((m) => m.user.bot);
       if (!bots.size) return i.reply({ content: "❌ เซิร์ฟนี้ยังไม่มีบอทให้เช็กสถานะเลยน้า", ephemeral: true });
 
-      const panelData = { channelId: targetChannel.id, messageId: null, botIds: bots.map((m) => m.id), maintenance: new Set(), stopped: new Set(), timeState: new Map() };
+      // prepare panelData (preserve timeState if exists)
+      const existing = botPanels.get(i.guild.id) || null;
+      const panelData = {
+        channelId: targetChannel.id,
+        messageId: null,
+        botIds: bots.map((m) => m.id),
+        maintenance: existing ? existing.maintenance : new Set(),
+        stopped: existing ? existing.stopped : new Set(),
+        timeState: existing ? existing.timeState : new Map()
+      };
+
+      // ensure timeState has entries for each bot (but do NOT overwrite existing timestamps)
+      for (const bId of panelData.botIds) {
+        if (!panelData.timeState.has(bId)) {
+          // initialize with current presence state if available
+          const mem = i.guild.members.cache.get(bId);
+          const isOnline = mem?.presence && mem.presence.status && mem.presence.status !== "offline";
+          panelData.timeState.set(bId, { lastStatus: isOnline ? "online" : "offline", lastChangeAt: Date.now() });
+        }
+      }
+
       const embed = buildBotPanelEmbed(i.guild, panelData);
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`botpanel_refresh_${i.guild.id}`).setStyle(ButtonStyle.Primary).setLabel("🔄 อัปเดตสถานะ"),
@@ -678,7 +720,7 @@ client.on("interactionCreate", async (i) => {
     }
 
     if (i.customId === `botpanel_stop_${i.guild.id}`) {
-      if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) return i.reply({ content: "❌ ปุ่มนี้ให้แอดมินกดเท่านั้นน้า", ephemeral: true });
+      if (!i.member.permissions.has(PermissionsBitField.Flags.Administrator)) return i.reply({ content: "❌ ปุ่มนี้ให้แอดมินกดเท่านั้นนะค้าบ", ephemeral: true });
       const panel = botPanels.get(i.guild.id);
       if (!panel) return i.reply({ content: "❌ ยังไม่มี Bot Status Panel สำหรับเซิร์ฟนี้นะ ลองใช้คำสั่ง /botpanel ก่อนน้า", ephemeral: true });
 
@@ -753,7 +795,6 @@ client.on("interactionCreate", async (i) => {
     // ===== Welcome staff buttons (mute/kick) =====
     if (i.customId.startsWith("welcome_mute_") || i.customId.startsWith("welcome_kick_")) {
       // handled lower in other handler - keep here for compatibility
-      // We'll let the separate welcome button handler handle it.
     }
 
     return;
@@ -823,13 +864,23 @@ client.on("interactionCreate", async (i) => {
 /////////////////////////////////////////////////////////////////
 // Presence Update -> Refresh Bot Panel
 /////////////////////////////////////////////////////////////////
-client.on("presenceUpdate", async (oldP, newP) => {
-  const p = newP || oldP;
-  if (!p?.user?.bot) return;
-  const guildId = p.guild?.id;
-  if (!guildId) return;
-  if (!botPanels.has(guildId)) return;
-  await updateBotPanel(guildId);
+client.on("presenceUpdate", async (oldPresence, newPresence) => {
+  try {
+    const p = newPresence || oldPresence;
+    if (!p) return;
+    // ensure we only care about bots
+    const userIsBot = p?.user?.bot ?? (p?.member?.user?.bot ?? false);
+    if (!userIsBot) return;
+
+    // guild id may be present as guildId or p.guild?.id or p.member.guild.id
+    const guildId = p.guildId || p.guild?.id || (p.member && p.member.guild && p.member.guild.id);
+    if (!guildId) return;
+    if (!botPanels.has(guildId)) return;
+    // update panel (non-blocking)
+    updateBotPanel(guildId).catch(err => console.log("presenceUpdate->updateBotPanel err:", err.message));
+  } catch (e) {
+    console.log("presenceUpdate handler error:", e.message);
+  }
 });
 
 /////////////////////////////////////////////////////////////////
@@ -838,9 +889,36 @@ client.on("presenceUpdate", async (oldP, newP) => {
 // - Uses config.welcomeChannel (channel id) OR config.welcomeLog OR guild.systemChannel
 // - Shows account age, suspicious flag (account < welcomeSuspiciousDays), server stats, join date/time (Asia/Bangkok)
 // - Optionally assigns role if config.welcomeAssignRoleId is set
+// - ALSO: if the joining member is a bot -> add to botPanels for its guild (do NOT reset other bots' timeState)
 /////////////////////////////////////////////////////////////////
 client.on("guildMemberAdd", async (member) => {
   try {
+    // If the new member is a bot and a server has a panel, add it to panel.botIds (preserve existing timeState)
+    if (member.user && member.user.bot) {
+      try {
+        const guildId = member.guild.id;
+        if (botPanels.has(guildId)) {
+          const panel = botPanels.get(guildId);
+          if (!panel.botIds.includes(member.id)) {
+            panel.botIds.push(member.id);
+            // initialize timeState for this bot if not exists
+            if (!panel.timeState) panel.timeState = new Map();
+            if (!panel.timeState.has(member.id)) {
+              const isOnline = member.presence && member.presence.status && member.presence.status !== "offline";
+              panel.timeState.set(member.id, { lastStatus: isOnline ? "online" : "offline", lastChangeAt: Date.now() });
+            }
+            // immediate panel update
+            updateBotPanel(guildId).catch(()=>{});
+            console.log(`Added new bot ${member.id} to botPanel for guild ${guildId}`);
+          }
+        }
+      } catch (e) {
+        console.log("Error adding new bot to panel:", e.message);
+      }
+      // For bots we do not send welcome human embed, so return after updating panels
+      return;
+    }
+
     const guild = member.guild;
 
     // Determine channel:
@@ -1014,4 +1092,6 @@ client.once("ready", async () => {
   }, 10_000);
 });
 
-client.login(config.token);
+client.login(config.token).catch(err => {
+  console.error("Client login error:", err.message);
+});
