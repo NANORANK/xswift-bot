@@ -322,6 +322,8 @@ async function doJoinVoice(guildId, voiceChannelId) {
     console.log("เข้าห้องเสียงสำเร็จ:", voiceChannelId);
     return true;
   } catch (e) {
+    // บาง environment จะโผล่ warning เกี่ยวกับ encryption modes
+    // ถ้าบอทเข้าจริง ๆ ก็ไม่ได้กระทบ แต่เราจะ log ให้ชัดเจน
     console.log("joinVoice error:", e.message);
     return false;
   }
@@ -919,7 +921,7 @@ client.on("interactionCreate", async (i) => {
         return;
       }
 
-      // ===== Welcome staff buttons handled elsewhere =====
+      // ===== Welcome staff quick actions handled below in separate listener =====
     }
 
     // Select Menu handlers...
@@ -1012,127 +1014,116 @@ client.on("presenceUpdate", async (oldP, newP) => {
 });
 
 /////////////////////////////////////////////////////////////////
-// NEW: Welcome Ultra System (uses per-guild settings if present)
+// NEW: Welcome Ultra — แจ้งเตือนสมาชิก/บอทใหม่ทุกประเภท
 /////////////////////////////////////////////////////////////////
 client.on("guildMemberAdd", async (member) => {
   try {
-    // If the new member is a bot and a server has a panel, add it to panel.botIds (preserve existing timeState)
-    if (member.user && member.user.bot) {
+    const guild = member.guild;
+    const guildId = guild.id;
+
+    // โหลดค่าที่ตั้งไว้
+    const welcomeChannelId = guildStore.getWelcomeChannel(guildId);
+    const welcomeLogId = guildStore.getWelcomeLogChannel(guildId);
+
+    // ⚡ ช่องที่จะ "ส่งข้อความต้อนรับหลัก"
+    let mainChannel = null;
+    if (welcomeChannelId) {
+      mainChannel = await client.channels.fetch(welcomeChannelId).catch(()=>null);
+    }
+
+    // ⚡ ช่องที่จะ "ส่ง Log" (สมาชิกใหม่ + bot ใหม่)
+    let logChannel = null;
+    if (welcomeLogId) {
+      logChannel = await client.channels.fetch(welcomeLogId).catch(()=>null);
+    }
+
+    // === ถ้าเป็นบอท ให้ใส่ใน Panel ด้วยและแจ้ง Log ===
+    if (member.user.bot) {
+      if (logChannel && logChannel.isTextBased()) {
+        logChannel.send({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0x00ffbb)
+              .setTitle("🤖 บอทใหม่เข้าร่วมเซิร์ฟเวอร์!")
+              .setDescription(`บอท ${member} ได้เข้ามาในเซิร์ฟ **${guild.name}** แล้วน้า`)
+              .setTimestamp()
+          ]
+        }).catch(()=>{});
+      }
+
+      // อัปเดต Bot Status Panel
       try {
-        const guildId = member.guild.id;
         const panel = botPanels.get(guildId) || guildStore.getPanelData(guildId);
         if (panel) {
           if (!panel.botIds.includes(member.id)) {
             panel.botIds.push(member.id);
+
             if (!panel.timeState) panel.timeState = new Map();
-            if (!panel.timeState.has(member.id)) {
-              const isOnline = member.presence && member.presence.status && member.presence.status !== "offline";
-              panel.timeState.set(member.id, { lastStatus: isOnline ? "online" : "offline", lastChangeAt: Date.now() });
-            }
+            panel.timeState.set(member.id, {
+              lastStatus: member.presence ? "online" : "offline",
+              lastChangeAt: Date.now()
+            });
+
             botPanels.set(guildId, panel);
             guildStore.setPanelData(guildId, panel);
             updateBotPanel(guildId).catch(()=>{});
-            console.log(`Added new bot ${member.id} to botPanel for guild ${guildId}`);
           }
         }
-      } catch (e) {
-        console.log("Error adding new bot to panel:", e.message);
-      }
-      return;
+      } catch (e) {}
+
+      return; // บอทไม่ต้องส่ง embed ต้อนรับแบบมนุษย์
     }
 
-    const guild = member.guild;
 
-    // Determine channel: per-guild setting -> fallback to config
-    const channelId = guildStore.getWelcomeChannel(guild.id) || guildStore.getWelcomeLogChannel(guild.id) || config.welcomeChannel || config.welcomeLog || guild.systemChannel?.id;
-    const ch = channelId ? await client.channels.fetch(channelId).catch(()=>null) : null;
-
-    // If no configured channel, try to find a channel named 'welcome' or 'ยินดีต้อนรับ'
-    let targetChannel = ch;
-    if (!targetChannel) {
-      targetChannel = guild.channels.cache.find(c => c.isTextBased() && /welcome|ยินดี|ต้อนรับ/i.test(c.name));
-    }
-    // fallback to systemChannel
-    if (!targetChannel && guild.systemChannel) targetChannel = guild.systemChannel;
-    if (!targetChannel) {
-      console.log(`No welcome channel for guild ${guild.id}, skipping welcome embed.`);
-      return;
-    }
-
-    await guild.members.fetch(member.id).catch(()=>null);
-
+    // === สมาชิกธรรมดา (User) ===
     const createdAt = member.user.createdTimestamp;
-    const accAge = accountAgeText(createdAt);
     const suspicious = isSuspiciousAccount(createdAt, config.welcomeSuspiciousDays ?? 7);
+    const accAge = accountAgeText(createdAt);
 
-    // server stats
-    const totalMembers = guild.memberCount;
-    await guild.members.fetch().catch(()=>null);
-    const bots = guild.members.cache.filter(m => m.user.bot).size;
-    const humans = totalMembers - bots;
-
+    // Embed ต้อนรับหลัก
     const welcomeEmbed = new EmbedBuilder()
-      .setTitle("🎀 ยินดีต้อนรับสู่ " + guild.name + "!")
-      .setDescription([
-        `สวัสดี ${member} นะค้า 💖`,
-        "",
-        `**📌 ข้อมูลบัญชี**`,
-        `• ชื่อ: ${member.user.tag}`,
-        `• สร้างบัญชี: <t:${Math.floor(createdAt/1000)}:f> (อายุบัญชี: **${accAge}**)`,
-        `• สถานะความน่าเชื่อถือ: ${suspicious ? "⚠️ *บัญชีใหม่ — โปรดตรวจสอบ*": "✅ ปลอดภัย"}`,
-        "",
-        `**📊 ข้อมูลเซิร์ฟ**`,
-        `• สมาชิกทั้งหมด: **${totalMembers}** (ผู้ใช้: ${humans} • บอท: ${bots})`,
-        `• เข้าร่วมเมื่อ: <t:${Math.floor(Date.now()/1000)}:f> (เวลาเซิร์ฟ: ${config.timezone || "Asia/Bangkok"})`,
-        "",
-        `❗ แอดมิน: หากต้องการยืนยันสมาชิกโดยอัตโนมัติ ให้ตั้งค่าใน \`bot_config.welcomeAssignRoleId\``
-      ].join("\n"))
+      .setColor(0xffa3e5)
+      .setTitle(`🎉 ยินดีต้อนรับ ${member.user.username}!`)
       .setThumbnail(member.user.displayAvatarURL({ dynamic: true, size: 256 }))
-      .setImage(WELCOME_IMAGE)
-      .setColor(suspicious ? 0xffcc00 : 0x66ffcc)
-      .setFooter({ text: "xSwift Hub | Welcome System" });
+      .setDescription(
+        [
+          `สวัสดี ${member} 💗`,
+          ``,
+          `📌 **ข้อมูลบัญชี**`,
+          `• อายุบัญชี: ${accAge}`,
+          `• ความน่าเชื่อถือ: ${suspicious ? "⚠️ บัญชีใหม่ โปรดตรวจสอบ" : "✅ ปกติ"}`,
+          ``,
+          `📊 เซิร์ฟเวอร์: **${guild.name}**`,
+          `เข้าร่วมเมื่อ <t:${Math.floor(Date.now()/1000)}:f>`,
+        ].join("\n")
+      )
+      .setImage(WELCOME_IMAGE || "")
+      .setTimestamp();
 
-    const actionRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`welcome_mute_${member.id}`).setLabel("🔇 Mute (Staff)").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`welcome_kick_${member.id}`).setLabel("🦶 Kick (Staff)").setStyle(ButtonStyle.Danger)
-    );
-
-    await targetChannel.send({ embeds: [welcomeEmbed], components: [actionRow] }).catch(()=> {
-      targetChannel.send({ embeds: [welcomeEmbed] }).catch(()=>{});
-    });
-
-    if (config.welcomeAssignRoleId) {
-      const role = guild.roles.cache.get(config.welcomeAssignRoleId) || await guild.roles.fetch(config.welcomeAssignRoleId).catch(()=>null);
-      if (role) {
-        try {
-          await member.roles.add(role, "Auto-assign welcome role");
-          const logChId = guildStore.getWelcomeLogChannel(guild.id) || config.welcomeLog;
-          if (logChId) {
-            const logCh = await client.channels.fetch(logChId).catch(()=>null);
-            if (logCh && logCh.isTextBased()) {
-              const logE = new EmbedBuilder().setColor(0x99ffdd).setTitle("Assigned Welcome Role").setDescription(`${member} ได้รับยศอัตโนมัติ: **${role.name}**`).setTimestamp();
-              logCh.send({ embeds: [logE] }).catch(()=>{});
-            }
-          }
-        } catch (e) {
-          console.log("ไม่สามารถมอบยศอัตโนมัติให้สมาชิกใหม่ได้:", e.message);
-        }
-      }
+    if (mainChannel && mainChannel.isTextBased()) {
+      mainChannel.send({ embeds: [welcomeEmbed] }).catch(()=>{});
+    } else {
+      // try fallback: channel name matching or system channel
+      let fallback = guild.channels.cache.find(c => c.isTextBased() && /welcome|ยินดี|ต้อนรับ/i.test(c.name));
+      if (!fallback && guild.systemChannel) fallback = guild.systemChannel;
+      if (fallback) fallback.send({ embeds: [welcomeEmbed] }).catch(()=>{});
     }
 
-    if (suspicious) {
-      const staffRoleName = config.welcomeNotifyRoleName || "ผู้ดูแล";
-      const staffRole = guild.roles.cache.find(r => r.name === staffRoleName);
-      const logChId = guildStore.getWelcomeLogChannel(guild.id) || config.welcomeLog;
-      const targetLogChannel = logChId ? await client.channels.fetch(logChId).catch(()=>null) : null;
-
-      if (staffRole && targetChannel) {
-        targetChannel.send({ content: `<@&${staffRole.id}> — ตรวจพบสมาชิกเข้าร่วมที่อายุบัญชียังน้อย โปรดตรวจสอบ: ${member}` }).catch(()=>{});
-      } else if (targetChannel && config.welcomeNotifyRoleName && !staffRole) {
-        targetChannel.send({ content: `@here — ตรวจพบสมาชิกเข้าร่วมที่อายุบัญชียังน้อย โปรดตรวจสอบ: ${member}` }).catch(()=>{});
-      } else if (targetLogChannel) {
-        targetLogChannel.send({ content: `⚠️ ตรวจพบสมาชิกเข้าร่วมที่อายุบัญชีน้อย: ${member}` }).catch(()=>{});
-      }
+    // === ส่ง Log ให้แอดมินเสมอ (ทั้งสมาชิก / บอท) ===
+    if (logChannel && logChannel.isTextBased()) {
+      logChannel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xffccdd)
+            .setTitle("📝 สมาชิกใหม่เข้าร่วม")
+            .setDescription(`${member} เข้าร่วมเซิร์ฟแล้ว`)
+            .addFields(
+              { name: "อายุบัญชี", value: accAge, inline: true },
+              { name: "ความเสี่ยง", value: suspicious ? "⚠️ บัญชีใหม่" : "ปกติ", inline: true }
+            )
+            .setTimestamp()
+        ]
+      }).catch(()=>{});
     }
 
   } catch (err) {
@@ -1144,6 +1135,7 @@ client.on("guildMemberAdd", async (member) => {
 // Buttons from welcome embed (staff quick actions) - basic handlers
 /////////////////////////////////////////////////////////////////
 client.on("interactionCreate", async (i) => {
+  // Quick-action handler kept separate to avoid mixing with main interaction handler (above)
   try {
     if (!i.isButton()) return;
     const id = i.customId;
