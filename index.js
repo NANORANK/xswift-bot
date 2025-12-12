@@ -364,7 +364,7 @@ async function joinVoiceForChannel(voiceChannel) {
 // ⚡ RANK PANEL / BOT STATUS / TICKETS (unchanged logic kept)
 /////////////////////////////////////////////////////////////////
 const PANEL_IMAGE = "https://cdn.discordapp.com/attachments/1445301442092072980/1448043469015613470/IMG_4817.gif";
-const WELCOME_IMAGE = "https://cdn.discordapp.com/attachments/1445301442092072980/1448043511558570258/1be0c476c8a40fbe206e2fbc6c5d213c.jpg";
+const WELCOME_IMAGE = "https://cdn.discordapp.com/attachments/1443960971394809906/1449042578887544996/discord_fake_avatar_decorations_1765546527690.gif?ex=693d7590&is=693c2410&hm=64b575820f8cc70c5a19ba262ab1d4670874a3fa734577c8da7043d74d3812c2&";
 
 const STATUS_PANEL_IMAGE = "https://cdn.discordapp.com/attachments/1443746157082706054/1448123647524081835/Unknown.gif";
 const STATUS_PANEL_ICON = "https://cdn.discordapp.com/attachments/1443746157082706054/1448123939250507887/CFA9E582-8035-4C58-9A79-E1269A5FB025.png";
